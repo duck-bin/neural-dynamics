@@ -1,0 +1,26 @@
+# neural-dynamics — Python dependencies (Colab "kitchen")
+# Install in Colab: %pip install -r requirements.txt
+# Two packages install from git (see comments) — pin later once pipeline is stable.
+
+# --- numerics / ML ---
+numpy
+scipy
+scikit-learn
+pandas
+torch                 # RNNs + autograd fixed-point finder / Jacobians
+h5py                  # nlb_tools data backing
+
+# --- data ---
+nlb_tools             # MC_Maze loading (Neural Latents Benchmark '21)
+dandi                 # download MC_Maze NWB from DANDI archive
+
+# --- differential-test oracles (hand code is primary; these are the oracles) ---
+# jPCA reference (Benjamin Antin):
+#   pip install git+https://github.com/bantin/jPCA.git
+# fixed-point reference (PyTorch Sussillo & Barak):
+#   pip install git+https://github.com/tripdancer0916/pytorch-fixed-point-analysis.git
+
+# --- inline visualization (notebook) ---
+plotly                # 3D trajectories with built-in orbit
+ipywidgets            # time scrubber / condition sliders
+nbformat              # plotly renderer dependency
