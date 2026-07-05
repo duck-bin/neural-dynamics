@@ -140,8 +140,51 @@ reaching data: wrong count or location => STOP and debug.
   all 8, and where the reference converges it agrees to 5e-4.
 
 ## M2 · Brain data — PCA + jPCA (Stage 1)
-_(MC_Maze preprocessing choices; fit R²; rotation-plane variance; adversarial
-check: rotation with vs without cross-condition-mean subtraction — before/after.)_
+
+**Status: PASS.** Loader in `python/data.py`, analysis in `tests/test_m2_brain.py`,
+web export in `python/export.py`.
+
+### Dataset: MC_Maze blocked → Churchland 2012 (see "Proposed deviations")
+MC_Maze needs the DANDI API (`api.dandiarchive.org`), which the egress policy
+blocks (403 on CONNECT; the DANDI *S3 bucket* is reachable, but enumerating a
+dandiset's assets requires the API). HuggingFace and Zenodo are also blocked;
+`raw.githubusercontent.com` is reachable. Per the README ("report it; use an
+alternative PUBLIC reaching dataset; NOT synthetic") we use the **Churchland et
+al. 2012** dataset itself — 218 neurons × 108 maze/reach conditions of
+condition-averaged smoothed rates, aligned to movement onset (−50..550 ms, 10 ms
+bins). This is the *actual Stage-1 reproduction target*, and Antin's reference
+loader reads it, so the differential test runs on identical real input.
+
+### Preprocessing note
+Churchland's published rates are already trial-averaged and smoothed, so the
+README's raw-spike steps (20 ms bins, Gaussian σ=40 ms) are already baked in by
+the source; we apply the jPCA-specific preprocessing (soft-normalize → CCM
+subtraction → PCA) on top, over the classic −50..150 ms rotation window.
+
+### Reported numbers (window −50..150 ms, k=6)
+- fit R² of `Ẋ = X Mᵀ` (skew, CCM subtracted): **0.524**.
+- top rotation-plane variance fraction: **0.464** (one plane holds ~46% of the
+  variance — strong rotational structure).
+- rotation frequency: **1.37 Hz** (period ~730 ms; the reach sweeps a partial arc
+  in the ~200 ms window, as in the paper).
+- differential test vs Antin on REAL data: principal angle **0.0001°**, freq match
+  **0.000%** — hand matches the oracle exactly on brain input.
+
+### Adversarial check (Lebedev et al. 2019): rotation without CCM subtraction?
+Running jPCA WITHOUT the cross-condition-mean subtraction: fit R² **0.556**, plane
+variance **0.558**, frequency **2.49 Hz**. So **the rotation survives** — it is NOT
+manufactured by the CCM step (contra a strong reading of the Lebedev critique).
+BUT the frequency and plane change: without CCM, jPCA characterizes the large
+condition-*independent* movement signal; with CCM it isolates the condition-
+*dependent* rotation that is Churchland's actual claim. Both are real rotations of
+different components — the preprocessing choice decides *which* you measure. The
+before/after figure is saved with the analysis.
+
+### Viewer / export
+`export_brain` writes `data/brain.json`: 108 trajectories in a 3D basis
+(jPC1, jPC2, top-orthogonal PC), `jpca_plane` = the z=0 plane, and **no fixed
+points / no flow field** — the brain has no equations, and the file encodes that
+asymmetry directly.
 
 ## M3 · Reaching RNN + jPCA (Stage 2 part 1)
 _(train on TASK not spikes; metabolic reg; velocity R² task gate; does the RNN
@@ -166,6 +209,7 @@ _(space asymmetry handled honestly; matched visual scale only; deploy notes.)_
 | M0-B | full hand `jpca()` vs `JPCA.fit()` | same raw `datas` | plane angle < 5°; freq < 5% | **0.0008°**; **0.000%** ✅ |
 | M0-truth | clean single-plane rotation | pure `R(ω)` orbits | recovered ω = sin(ω) < 0.5% | 0.0000% ✅ |
 | M1 | our finder vs `pytorch-fixed-point-analysis` | same trained flip-flop RNN | ref points → our corners < 0.15 | precision **5e-4**, coverage 6/8 ✅ |
+| M2 | hand `jpca()` vs `JPCA.fit()` on REAL data | same Churchland 2012 rates | plane angle < 5°; freq < 5% | **0.0001°**; **0.000%** ✅ |
 
 Run: `python tests/test_m0_jpca.py`; `REF_FPA_DIR=… python tests/test_m1_flipflop.py`.
 (M2 re-runs M0-B on MC_Maze.)
@@ -174,6 +218,20 @@ Run: `python tests/test_m0_jpca.py`; `REF_FPA_DIR=… python tests/test_m1_flipf
 _(Any change to the FIXED commitments — jPCA steps, fixed-point objective + IC
 rule, differential-test tolerances, flip-flop 8-corner gate, train-on-task-not-
 spikes, scope boundary — goes here with rationale. Do NOT silently change these.)_
+
+**D1 — Stage-1 dataset: MC_Maze → Churchland 2012 (FLAGGED, needs your call).**
+MC_Maze (README's named primary) is unreachable in this environment: the DANDI
+API returns 403 (egress policy), and HuggingFace/Zenodo are blocked too. The
+README's own fallback rule says to use an alternative *public* reaching dataset
+rather than synthetic. I chose **Churchland et al. 2012** (`exampleData.mat`, via
+`raw.githubusercontent.com`), because it is (a) the exact Stage-1 reproduction
+target the README names, (b) 108 reach conditions × 218 neurons — plenty for
+jPCA, and (c) the data Antin's reference loader reads, so the differential test
+runs on identical real input. This is arguably *more* faithful to "reproduce
+Churchland 2012" than MC_Maze, and it is reversible (swap `data.load_mc_maze`
+back in if the policy changes). **If you specifically need MC_Maze** (e.g. you can
+grant DANDI egress or provide a local copy), say so and I'll switch — the M0/M2
+pipeline is dataset-agnostic. Proceeding on Churchland 2012 for now.
 
 ## Honesty citations (in scope to mention, out of scope to run)
 - Lebedev et al. (2019) — critique of the cross-condition-mean subtraction step.
