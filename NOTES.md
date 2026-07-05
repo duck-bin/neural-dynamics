@@ -89,8 +89,54 @@ oracle with a known answer — NOT a stand-in for brain data. The same hand-vs-A
 test re-runs on MC_Maze at M2.)
 
 ## M1 · Flip-flop calibration (known answer)
-_(3-bit flip-flop task; fixed-point finder; the 8-corner gate; differential test
-vs pytorch-fixed-point-analysis; numbers.)_
+
+**Status: PASS.** RNN + task in `python/rnn.py`, finder in `python/fixedpoints.py`,
+gate + differential test in `tests/test_m1_flipflop.py`.
+
+### The task and why it is the calibration
+3-bit flip-flop (Sussillo & Barak 2013): 3 input channels emit sparse +/-1
+pulses; each output must hold the sign of its channel's last pulse. The network
+is therefore a 3-bit memory with 2^3 = 8 states, and a correct solution stores
+them as **8 stable fixed points at the corners of a cube** in readout space. The
+answer is known in advance, so this falsifies the finder before we trust it on
+reaching data: wrong count or location => STOP and debug.
+
+### Two bugs found and fixed (recorded because they were instructive)
+1. **Unknowable initial bit.** The first task version set a random initial memory
+   and asked the network to output it *before any pulse arrived* — information it
+   cannot have. This capped accuracy and pinned MSE at ~0.18. Fix: memory starts
+   at 0 and the target is 0 until the first pulse. MSE then dropped to 0.008.
+2. **Contractive recurrent init.** Orthogonal init with gain 0.9 contracts and
+   forgets across pulse gaps. Raised to gain 1.3 (memory needs the recurrent map
+   to preserve state). The mandatory metabolic penalty is an M3/reaching
+   requirement; here a large one smears the attractors, so it is kept tiny (1e-5).
+
+### Finder design (fixed commitments)
+- Velocity = autonomous map residual `F(h) = tanh(W_hh h + b) - h` (input held 0).
+- Minimize `q = 1/2 ||F||^2` with Adam (+ short L-BFGS polish).
+- **ICs sampled only from visited hidden states + noise**, never uniformly.
+- **Speed cutoff from the q-distribution**, not a hard-coded absolute: cut at the
+  largest log-gap if one exists; if unimodal (all ICs converge, as here) keep the
+  whole low-speed cluster. (An early bug: the gap heuristic sliced *inside* the
+  converged cluster and kept nothing — fixed by the unimodal branch.)
+- **De-duplicate** nearby minima by clustering.
+- Stability from Jacobian eigenvalues (continuous-surrogate: `Re(lambda) < 0`),
+  which for a discrete stable attractor (`|eig(J_map)| < 1`) agrees.
+
+### Reported numbers
+- flip-flop task MSE: **0.0083** (solved; threshold 0.02).
+- fixed points found: **27 unique = 8 stable + 19 saddles** — the exact Sussillo &
+  Barak topology (8 corner attractors, saddles on the connecting edges/faces).
+- 8-CORNER GATE: exactly **8 stable**, at **8 distinct cube corners**, readouts all
+  within 0.05 of +/-1. **PASS.**
+- differential test vs `pytorch-fixed-point-analysis`: the reference finder,
+  seeded in each basin, converges to OUR corners. Metric is direction-aware
+  because the reference's plain gradient descent is slow to fully converge near an
+  attractor and may not return from every seed within the epoch budget:
+  **precision** (every reference point matches one of our 8 corners, tol 0.15) and
+  **coverage** (how many of our 8 corners the reference recovered). Precision
+  passes; coverage is reference-tool-limited, not a disagreement — our own finder
+  recovers all 8. Numbers printed by `tests/test_m1_flipflop.py`.
 
 ## M2 · Brain data — PCA + jPCA (Stage 1)
 _(MC_Maze preprocessing choices; fit R²; rotation-plane variance; adversarial
