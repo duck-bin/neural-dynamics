@@ -131,12 +131,13 @@ reaching data: wrong count or location => STOP and debug.
   within 0.05 of +/-1. **PASS.**
 - differential test vs `pytorch-fixed-point-analysis`: the reference finder,
   seeded in each basin, converges to OUR corners. Metric is direction-aware
-  because the reference's plain gradient descent is slow to fully converge near an
-  attractor and may not return from every seed within the epoch budget:
-  **precision** (every reference point matches one of our 8 corners, tol 0.15) and
-  **coverage** (how many of our 8 corners the reference recovered). Precision
-  passes; coverage is reference-tool-limited, not a disagreement — our own finder
-  recovers all 8. Numbers printed by `tests/test_m1_flipflop.py`.
+  because the reference's plain gradient descent is slow near an attractor and may
+  not return from every seed within the epoch budget. Result:
+  **precision = 0.0005** (worst reference point → nearest of our 8 corners; tol
+  0.15 — i.e. every reference fixed point lands essentially exactly on one of
+  ours) and **coverage = 6/8** (reference converged from 12/16 seeds in ~100 s).
+  Coverage is reference-tool-limited, not a disagreement: our own finder recovers
+  all 8, and where the reference converges it agrees to 5e-4.
 
 ## M2 · Brain data — PCA + jPCA (Stage 1)
 _(MC_Maze preprocessing choices; fit R²; rotation-plane variance; adversarial
@@ -164,8 +165,10 @@ _(space asymmetry handled honestly; matched visual scale only; deploy notes.)_
 | M0-A′ | vectorized-LS vs Sylvester (two hand closed forms) | same `(X, Ẋ)` | agree < 1e-8 | 9e-16 ✅ |
 | M0-B | full hand `jpca()` vs `JPCA.fit()` | same raw `datas` | plane angle < 5°; freq < 5% | **0.0008°**; **0.000%** ✅ |
 | M0-truth | clean single-plane rotation | pure `R(ω)` orbits | recovered ω = sin(ω) < 0.5% | 0.0000% ✅ |
+| M1 | our finder vs `pytorch-fixed-point-analysis` | same trained flip-flop RNN | ref points → our corners < 0.15 | precision **5e-4**, coverage 6/8 ✅ |
 
-Run: `python tests/test_m0_jpca.py`. (M2 re-runs M0-B on MC_Maze.)
+Run: `python tests/test_m0_jpca.py`; `REF_FPA_DIR=… python tests/test_m1_flipflop.py`.
+(M2 re-runs M0-B on MC_Maze.)
 
 ## Proposed deviations (I propose, the user decides)
 _(Any change to the FIXED commitments — jPCA steps, fixed-point objective + IC
