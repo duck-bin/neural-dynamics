@@ -247,9 +247,59 @@ and flag the rationale mismatch under "Proposed deviations" D2.
   Jacobian classification cleaner.
 
 ## M4 · Reaching RNN fixed points + flow field (Stage 2 part 2)
-_(q(x) objective; IC sampling rule; tolerance from q-distribution; clustering;
-Jacobian stability classes; adversarial check: FP stability to IC re-sampling +
-hand-vs-reference Hungarian alignment; numbers.)_
+
+**Status: PASS.** Finder/classifier in `python/fixedpoints.py`, flow field in
+`python/flowfield.py`, analysis in `tests/test_m4_fixedpoints.py`.
+
+### The objective and the rules (README, verbatim commitments)
+- Minimize `q(x) = ½‖dx/dt‖²` on the RNN's **autonomous** velocity field
+  `F(x) = −x + W_rec φ(x)` (input held at 0). Adam then an L-BFGS polish.
+- **ICs sampled ONLY from hidden states visited on real movement-epoch trials**
+  (+ Gaussian noise). Uniform sampling would invent spurious slow points in
+  regions the dynamics never visit.
+- Tolerance from the **distribution** of q (largest log-gap; unimodal → keep the
+  low cluster), never a hard-coded absolute. De-duplicate by clustering.
+- Classify by Jacobian `J = ∂F/∂x` eigenvalues (continuous convention:
+  Re<0 contracting, Re>0 expanding).
+
+### The finding (the mechanism behind the rotation)
+The autonomous field is organized by a **single dominant fixed point**: an
+**unstable spiral / rotational saddle** at `|x| = 2.58`, 6 unstable directions,
+leading eigenpair **+0.51 ± 1.33i**. The complex leading pair is the point: its
+imaginary part (~1.33 rad per time-unit) is the **local rotation rate**, and that
+rotation is exactly what jPCA *describes* at M2/M3. `q`-speed at the point is
+3.5e-3 versus a raw field magnitude ~12.5 over visited states — a ~3500× drop, so
+it is a genuine fixed point, not a slow point. The flow field sampled in the jPCA
+plane has a strong net rotational (curl) component **+0.96**: trajectories spiral
+*outward* from this point, tracing the rotation.
+
+**Contrast with M1 — the pedagogical core.** Flip-flop: 8 point attractors (discrete
+memory). Reaching: 1 rotational saddle (a rotation generator). Same analysis, very
+different fixed-point topology, because the *computations* differ — memory vs.
+generating a timed rotational output. Fixed-point structure IS the computation.
+
+Input-dependent structure (held-input variants, in the analysis notes): with the
+go signal on it is a **stable spiral** at `|x|≈18`; during prep (cue, go=0) a
+**saddle** at `|x|≈6.8`. The movement is the transient between these regimes,
+rotating because every one of these points is a spiral (complex eigenpair).
+
+### Adversarial checks (the skeptic's tests)
+- **Stable to IC re-sampling?** Re-running the finder from a *different* IC seed
+  re-finds the point within **0.038** (256-dim distance). Not an artifact of the
+  particular ICs.
+- **Does the "port" agree?** The M1 reference oracle is a *discrete-map* finder and
+  cannot analyze this continuous field, so the independent check is **SciPy's
+  Newton/hybrid root finder** on `F(x)=0` from a perturbed start: it converges to
+  residual `‖F‖ = 2.3e-7` at distance **0.037** from our point. Two independent
+  algorithms (our Adam+L-BFGS vs SciPy Newton) agree — the differential-test spirit
+  of M0, applied where the named reference does not fit.
+
+### Rejected / notes
+- **Uniform IC sampling:** rejected per the rule — it manufactures slow points off
+  the data manifold.
+- **Held-input = movement value per condition:** would give one prep fixed point
+  per direction; we use the autonomous field (u=0) as the single clean "intrinsic
+  dynamics" picture, and record the held-input variants above.
 
 ## M5 · Unified viewer + deploy
 _(space asymmetry handled honestly; matched visual scale only; deploy notes.)_
@@ -266,9 +316,13 @@ _(space asymmetry handled honestly; matched visual scale only; deploy notes.)_
 | M0-truth | clean single-plane rotation | pure `R(ω)` orbits | recovered ω = sin(ω) < 0.5% | 0.0000% ✅ |
 | M1 | our finder vs `pytorch-fixed-point-analysis` | same trained flip-flop RNN | ref points → our corners < 0.15 | precision **5e-4**, coverage 6/8 ✅ |
 | M2 | hand `jpca()` vs `JPCA.fit()` on REAL data | same Churchland 2012 rates | plane angle < 5°; freq < 5% | **0.0001°**; **0.000%** ✅ |
+| M4 | our Adam+L-BFGS finder vs SciPy Newton | same continuous field `F(x)` | independent root at same point < 0.2 | dist **0.037**, ‖F‖ 2.3e-7 ✅ |
+| M4-resample | finder seed-1 vs seed-777 | same RNN, different ICs | fixed point re-found < 0.5 | **0.038** ✅ |
 
-Run: `python tests/test_m0_jpca.py`; `REF_FPA_DIR=… python tests/test_m1_flipflop.py`.
-(M2 re-runs M0-B on MC_Maze.)
+Run: `python tests/test_m0_jpca.py`; `REF_FPA_DIR=… python tests/test_m1_flipflop.py`;
+`python tests/test_m3_reaching.py`; `python tests/test_m4_fixedpoints.py`.
+(M2 re-runs M0-B on real data. M4's discrete reference does not fit a continuous
+RNN, so SciPy Newton is the independent oracle.)
 
 ## Proposed deviations (I propose, the user decides)
 _(Any change to the FIXED commitments — jPCA steps, fixed-point objective + IC

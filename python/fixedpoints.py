@@ -170,8 +170,10 @@ def jacobian(velocity_fn, x: np.ndarray, device: str = "cpu") -> np.ndarray:
 
 @dataclass
 class Stability:
-    label: str                    # stable | unstable | saddle
-    is_rotational: bool           # leading eigenpair complex with |Re| ~ 0
+    label: str                    # stable | unstable | saddle | rotational(center)
+    is_rotational: bool           # leading eigenpair complex with near-zero Re (center)
+    is_spiral: bool               # leading eigenpair complex (rotation-dominated flow)
+    lead_eig: complex             # leading eigenvalue (|Im| = local rotation rate)
     eigenvalues: np.ndarray       # complex eigenvalues of J
     n_unstable: int               # count of eigenvalues with Re > tol
 
@@ -179,21 +181,30 @@ class Stability:
 def classify(J: np.ndarray, real_tol: float = 1e-3) -> Stability:
     """Classify a fixed point from Jacobian eigenvalues (continuous convention).
 
-    Re(lambda) < 0 = contracting direction, > 0 = expanding. All contracting =>
-    stable; all expanding => unstable; mixed => saddle. 'Rotational' flags a
-    leading complex pair with near-zero real part (a rotation-organizing point),
-    which is exactly the local structure that generates jPCA-style rotation.
+    Re(lambda) < 0 = contracting direction, > 0 = expanding. Node/spiral labels
+    by the sign pattern of the real parts:
+      all Re < 0 => stable ; all Re > 0 => unstable ; mixed => saddle ;
+      all |Re| ~ 0 (a center) => rotational.
+    Separately, `is_spiral` flags that the LEADING eigenpair is complex — the
+    local flow rotates. This is the key mechanistic quantity for M4: a saddle
+    whose leading pair is complex (e.g. +0.5 +/- 1.3i) is an *unstable spiral*
+    whose imaginary part is the local rotation rate that GENERATES the jPCA
+    rotation. `is_rotational` is the stricter README sense (complex pair with
+    near-zero real part = a pure center).
     """
     eigs = np.linalg.eigvals(J)
     n_unstable = int(np.sum(eigs.real > real_tol))
-    if n_unstable == 0:
+    n_stable = int(np.sum(eigs.real < -real_tol))
+    if n_unstable == 0 and n_stable == len(eigs):
         label = "stable"
     elif n_unstable == len(eigs):
         label = "unstable"
+    elif n_unstable == 0 and n_stable == 0:
+        label = "rotational"                     # all eigenvalues near imaginary axis
     else:
         label = "saddle"
 
-    order = np.argsort(-eigs.real)               # least-stable first
-    lead = eigs[order[0]]
-    is_rot = bool(abs(lead.imag) > real_tol and abs(lead.real) < real_tol)
-    return Stability(label, is_rot, eigs, n_unstable)
+    lead = eigs[np.argsort(-eigs.real)[0]]       # least-stable (largest-Re) mode
+    is_spiral = bool(abs(lead.imag) > real_tol)
+    is_rot = bool(is_spiral and abs(lead.real) < real_tol)
+    return Stability(label, is_rot, is_spiral, complex(lead), eigs, n_unstable)
