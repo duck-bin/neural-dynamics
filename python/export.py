@@ -111,3 +111,68 @@ def export_rnn(path, jpca_result, conditions, fixed_points=None, flow_field=None
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(payload))
     return payload
+
+
+def _hidden_basis(traj_hidden: np.ndarray, plane: np.ndarray, origin: np.ndarray) -> np.ndarray:
+    """Orthonormal (N x 3) basis in HIDDEN space: jPC1, jPC2, + top orthogonal dir.
+
+    Used for the RNN export, where trajectories, fixed points, and the flow field
+    all live in raw hidden space and must share ONE linear projection so they
+    overlay correctly (the k-space `_embed_basis` cannot place raw-hidden fixed
+    points without re-applying jPCA preprocessing, which is not a clean map).
+    """
+    C, T, N = traj_hidden.shape
+    Xc = traj_hidden.reshape(C * T, N) - origin
+    resid = Xc - (Xc @ plane) @ plane.T
+    _, _, vt = np.linalg.svd(resid, full_matrices=False)
+    u3 = vt[0] - plane @ (plane.T @ vt[0])
+    u3 = u3 / (np.linalg.norm(u3) + 1e-12)
+    return np.column_stack([plane[:, 0], plane[:, 1], u3])   # (N, 3)
+
+
+def export_rnn_hidden(path, traj_hidden, plane, origin, fixed_points, flow_field,
+                      meta=None) -> dict:
+    """RNN JSON from HIDDEN-space inputs, all projected through ONE shared basis.
+
+    traj_hidden : (C, T, N) raw condition-averaged hidden states.
+    plane       : (N, 2) orthonormal jPC plane in hidden space.
+    origin      : (N,) center of the projection (e.g. hidden mean).
+    fixed_points: list of {'x': (N,), 'eigs': [[re,im],...], 'stability': str,
+                           'is_spiral': bool}.
+    flow_field  : {'pos': (M, N), 'vec': (M, N)} sampled dx/dt (or None).
+    """
+    traj_hidden = np.asarray(traj_hidden, float)
+    plane = np.asarray(plane, float)
+    origin = np.asarray(origin, float)
+    C, T, N = traj_hidden.shape
+    basis = _hidden_basis(traj_hidden, plane, origin)         # (N, 3)
+
+    coords = ((traj_hidden.reshape(C * T, N) - origin) @ basis).reshape(C, T, 3)
+    trajectories = {str(c): np.round(coords[c], 5).tolist() for c in range(C)}
+
+    fps = []
+    for fpt in (fixed_points or []):
+        pos3 = ((np.asarray(fpt["x"], float) - origin) @ basis)
+        fps.append({"pos": np.round(pos3, 5).tolist(),
+                    "eigs": fpt.get("eigs", []),
+                    "stability": fpt.get("stability", ""),
+                    "is_spiral": bool(fpt.get("is_spiral", False))})
+
+    flows = []
+    if flow_field is not None:
+        P = (np.asarray(flow_field["pos"], float) - origin) @ basis
+        V = np.asarray(flow_field["vec"], float) @ basis
+        for p3, v3 in zip(P, V):
+            flows.append({"pos": np.round(p3, 5).tolist(), "vec": np.round(v3, 5).tolist()})
+
+    payload = {
+        "trajectories": trajectories,
+        "labels": None,
+        "fixed_points": fps,
+        "flow_field": flows,
+        "jpca_plane": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],     # jPC plane = z=0 in this basis
+        "meta": {"kind": "rnn", "has_mechanism": True, "n_conditions": C, **(meta or {})},
+    }
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(payload))
+    return payload

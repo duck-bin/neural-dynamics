@@ -302,7 +302,48 @@ rotating because every one of these points is a spiral (complex eigenpair).
   dynamics" picture, and record the held-input variants above.
 
 ## M5 · Unified viewer + deploy
-_(space asymmetry handled honestly; matched visual scale only; deploy notes.)_
+
+**Status: DONE** (viewer built + verified; deploy documented). Viewer in
+`web/`, exports in `python/export.py` + `scripts/build_*`.
+
+### The build
+- `data/brain.json` (M2) and `data/rnn.json` (`scripts/build_rnn_export.py`) hold
+  trajectories (+ for the RNN: fixed points with eigenvalues/stability, and the
+  flow field), each in a 3D basis `[jPC1, jPC2, top-orthogonal]`.
+- The RNN's fixed point and flow live in **raw hidden space**, so its export
+  computes the rotation plane on RAW hidden states (no soft-norm/CCM) — that keeps
+  the projection a clean linear map, so trajectories, the fixed point, and the
+  flow field all overlay in one basis. (The k-space `export_rnn` can't place a
+  raw-hidden fixed point without re-applying jPCA preprocessing; hence
+  `export_rnn_hidden`.)
+- `web/index.html` is generated from `web/viewer_template.html` with the JSON
+  **inlined** (`scripts/build_viewer.py`) — a single self-contained file, no
+  external libraries, so it runs as a local file, on HF Spaces / GitHub Pages, and
+  as a Claude Artifact (whose CSP blocks external requests). Custom Canvas 3D
+  renderer rather than react-three-fiber, because inlining Three.js into a CSP-
+  restricted artifact is impractical and a hand-rolled orthographic camera covers
+  every required interaction.
+
+### Honest handling of the asymmetry (the whole point)
+- **Brain** panel = trajectories + jPCA plane. Flow-field and fixed-point toggles
+  are **disabled** in Brain view; the panel subtitle reads "no equations". This
+  encodes the descriptive-only status of brain data in the UI itself.
+- **RNN** panel adds fixed points (colored by stability, hover → Jacobian
+  eigenvalues) + flow field.
+- **Side-by-side** renders each in its OWN jPCA space, matched by visual scale
+  only, with a standing note that they are different state spaces. We never force
+  a shared coordinate frame (that would be the DSA problem — next iteration).
+
+### Verified (Playwright + Chromium, no console errors)
+Brain / RNN / side-by-side all render; the fixed-point hover shows
+`SADDLE · SPIRAL` with eigenvalues `0.51±1.33i, 0.42±0.79i, …`; layer toggles,
+time scrubber, and condition slider all work. Screenshots retained during dev.
+
+### Deploy
+Hugging Face Spaces (Static SDK): drop the self-contained `web/index.html` at the
+Space root (see `web/README.md`). GitHub Pages is an equivalent fallback. Actual
+push to a Space needs the user's HF credentials (not available in this
+environment), so the deploy is prepared + documented, not executed.
 
 ---
 
