@@ -226,17 +226,20 @@ effective dimensionality):
 | 0     | 0.998 | 0.884 | 0.137 | 2.52 | 0.392 |
 | 1e-3  | 0.998 | 0.905 | 0.151 | 2.56 | 0.368 |
 | 1e-2  | 0.997 | 0.912 | 0.164 | 2.69 | 0.292 |
+| 1e-1  | 0.985 | 0.942 | 0.102 | 3.53 | 0.120 |
 
 Two things stand out. (1) The penalty **does** do mechanical work: `mean|rate|`
-falls monotonically as λ grows (0.39 → 0.37 → 0.29), which is exactly what an L2-
-on-rates term should do. (2) But **effective dimensionality does not drop** — PR
-actually nudges *up* (2.52 → 2.69), the opposite of the README's "without it →
-high-dimensional" rationale. So in this simplified 16-direction task the penalty is
-not the thing controlling dimensionality; the task is simple enough (2-D velocity,
-16 clean conditions) that even the unregularized solution is low-dimensional, and
-the Sussillo 2015 effect needs a harder task (EMG/muscle output, richer condition
-set) to bite. We **keep** the penalty (README-mandated, harmless, and it does bound
-rate magnitude), and flag the rationale mismatch under "Proposed deviations".
+falls monotonically as λ grows (0.39 → 0.12), which is exactly what an L2-on-rates
+term should do. (2) But **effective dimensionality moves the wrong way** — PR
+*rises* with λ (2.52 → 3.53), the **opposite** of the README's "without it →
+high-dimensional" rationale. A plausible reading: squeezing per-unit rates forces
+the computation to spread across *more* units, nudging dimensionality up. So in
+this simplified 16-direction task the penalty is not what controls dimensionality;
+the task is simple enough (2-D velocity, 16 clean conditions) that even the
+unregularized solution is low-dimensional, and the Sussillo 2015 effect needs a
+harder task (EMG/muscle output, richer condition set) to bite. We **keep** the
+penalty (README-mandated, harmless at λ=1e-3, and it does bound rate magnitude),
+and flag the rationale mismatch under "Proposed deviations" D2.
 
 ### Rejected alternatives
 - **Discrete vanilla RNN (as in M1) for reaching:** rejected — the README fixes the
