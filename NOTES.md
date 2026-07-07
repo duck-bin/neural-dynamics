@@ -187,8 +187,61 @@ points / no flow field** — the brain has no equations, and the file encodes th
 asymmetry directly.
 
 ## M3 · Reaching RNN + jPCA (Stage 2 part 1)
-_(train on TASK not spikes; metabolic reg; velocity R² task gate; does the RNN
-rotate — variance fraction.)_
+
+**Status: PASS.** RNN in `python/rnn.py` (`ReachingRNN`, `train_reaching`),
+analysis in `tests/test_m3_reaching.py`.
+
+### The key concept (the one the README says not to get wrong)
+The RNN is trained on the **behavioral task**, never on neural data. Inputs =
+target direction cue `[cosθ, sinθ]` + a go signal; output = hand velocity (a
+bell-shaped speed bump in direction θ, zero during the delay). We then ask whether
+the **emergent** hidden dynamics rotate like M1. Fitting the RNN *to spikes* would
+make "the RNN reproduces the brain" circular — the whole claim is that rotation
+falls out of the *task demands*, so the training signal must be behavior only.
+
+### RNN spec
+256-unit continuous-time tanh RNN, Euler-integrated:
+`dx/dt = −x + W_rec φ(x) + W_in u + b`, `x_{t+1} = x_t + (dt/τ) dx/dt`, `z = W_out x`,
+τ=10. The closed-form velocity `dx/dt` is exposed for the M4 fixed-point finder.
+
+### Reported numbers (movement epoch, k=6)
+- velocity **R² = 0.9989** (task gate > 0.90) — task solved, so dynamics analysis
+  is meaningful.
+- jPCA on condition-averaged hidden states: skew fit **R² = 0.884**, top rotation-
+  plane variance fraction **0.149**. **The RNN rotates** — same signature as the
+  brain, with no spikes ever shown (Sussillo et al. 2015 reproduced).
+- Why plane-variance is "only" 15% while fit R² is high: the largest-variance
+  hidden direction is the *static target-tuning* axis; the rotation is a real but
+  lower-variance component. jPCA fits the **derivative** structure, which is
+  strongly rotational, hence high fit R² despite modest plane variance.
+
+### Adversarial / honesty: the metabolic-regularization rationale does NOT reproduce
+The README makes the metabolic penalty (L2 on firing rates) mandatory because
+*without* it the network supposedly finds a non-biological **high-dimensional**
+solution. Ablation in this simplified 16-direction task (participation ratio PR =
+effective dimensionality):
+
+| metabolic λ | velocity R² | jPCA fit R² | plane var | PR | mean\|rate\| |
+|---|---|---|---|---|---|
+| 0     | 0.998 | 0.884 | 0.137 | 2.52 | 0.392 |
+| 1e-3  | 0.998 | 0.905 | 0.151 | 2.56 | 0.368 |
+| 1e-2  | 0.997 | 0.912 | 0.164 | 2.69 | 0.292 |
+
+Two things stand out. (1) The penalty **does** do mechanical work: `mean|rate|`
+falls monotonically as λ grows (0.39 → 0.37 → 0.29), which is exactly what an L2-
+on-rates term should do. (2) But **effective dimensionality does not drop** — PR
+actually nudges *up* (2.52 → 2.69), the opposite of the README's "without it →
+high-dimensional" rationale. So in this simplified 16-direction task the penalty is
+not the thing controlling dimensionality; the task is simple enough (2-D velocity,
+16 clean conditions) that even the unregularized solution is low-dimensional, and
+the Sussillo 2015 effect needs a harder task (EMG/muscle output, richer condition
+set) to bite. We **keep** the penalty (README-mandated, harmless, and it does bound
+rate magnitude), and flag the rationale mismatch under "Proposed deviations".
+
+### Rejected alternatives
+- **Discrete vanilla RNN (as in M1) for reaching:** rejected — the README fixes the
+  reaching RNN as continuous-time, and continuous dynamics make the M4 flow field /
+  Jacobian classification cleaner.
 
 ## M4 · Reaching RNN fixed points + flow field (Stage 2 part 2)
 _(q(x) objective; IC sampling rule; tolerance from q-distribution; clustering;
@@ -232,6 +285,19 @@ Churchland 2012" than MC_Maze, and it is reversible (swap `data.load_mc_maze`
 back in if the policy changes). **If you specifically need MC_Maze** (e.g. you can
 grant DANDI egress or provide a local copy), say so and I'll switch — the M0/M2
 pipeline is dataset-agnostic. Proceeding on Churchland 2012 for now.
+
+**D2 — metabolic-reg rationale does not reproduce here (FLAGGED, not a change).**
+I am **keeping** the metabolic penalty (README-mandatory). But its stated
+justification — "without it the network finds a non-biological high-dimensional
+solution" — does **not** hold in my simplified 16-direction reach task: the penalty
+compresses rate magnitude (as expected) but effective dimensionality does not drop
+— PR stays ~2.5 and if anything nudges up as λ grows (see M3 sweep table). The
+penalty bounds rates but is not load-bearing for dimensionality here. Two honest options if you
+want the penalty to *matter* (either is scope-expanding, so I did not take it):
+(a) harden the task toward Sussillo 2015 (EMG/muscle-like output, more conditions,
+longer horizon) so the unregularized solution actually inflates in dimension; or
+(b) accept it as a faithful-but-inert term and move on. I recommend (b) for this
+iteration. Your call.
 
 ## Honesty citations (in scope to mention, out of scope to run)
 - Lebedev et al. (2019) — critique of the cross-condition-mean subtraction step.

@@ -173,3 +173,128 @@ def collect_hidden_states(model, n_trials=32, length=300, seed=123, device="cpu"
         x = torch.from_numpy(x_np).to(device)
         hidden_list, _, _ = model(x)
     return hidden_list.reshape(-1, model.n_hid).cpu().numpy()
+
+
+# ==========================================================================
+# M3/M4: center-out reaching task + 256-unit continuous-time RNN
+# ==========================================================================
+def generate_reaching(n_dirs=8, reps=8, T=60, go=20, dt=1.0, tau=10.0,
+                      peak=14, width=6.0, noise=0.02, seed=None):
+    """Delayed center-out reach: target cue held throughout, GO gates movement.
+
+    Inputs u (B, T, 3) = [cos(theta), sin(theta), go(t)]; go steps 0->1 at t=go.
+    Target output vel (B, T, 2) = a bell-shaped speed bump in direction theta,
+    ZERO before GO (the delay/prep period). The prep->movement structure is what
+    makes the emergent dynamics rotational (Churchland/Sussillo).
+
+    Returns u, vel, dir_idx (condition = reach direction).
+    """
+    rng = np.random.default_rng(seed)
+    dirs = np.arange(n_dirs)
+    thetas = 2 * np.pi * dirs / n_dirs
+    B = n_dirs * reps
+    t = np.arange(T)
+    bump = np.where(t >= go, np.exp(-((t - go - peak) ** 2) / (2 * width ** 2)), 0.0)
+
+    u = np.zeros((B, T, 3), dtype=np.float32)
+    vel = np.zeros((B, T, 2), dtype=np.float32)
+    dir_idx = np.zeros(B, dtype=int)
+    b = 0
+    for _ in range(reps):
+        for k in range(n_dirs):
+            th = thetas[k]
+            u[b, :, 0] = np.cos(th)
+            u[b, :, 1] = np.sin(th)
+            u[b, t >= go, 2] = 1.0
+            vel[b, :, 0] = bump * np.cos(th)
+            vel[b, :, 1] = bump * np.sin(th)
+            dir_idx[b] = k
+            b += 1
+    u += rng.normal(scale=noise, size=u.shape).astype(np.float32)
+    return u, vel, dir_idx
+
+
+class ReachingRNN(nn.Module):
+    """256-unit continuous-time tanh RNN (Euler-integrated).
+
+        dx/dt = -x + W_rec phi(x) + W_in u + b ,   z = W_out x ,   phi = tanh
+        x_{t+1} = x_t + (dt/tau) dx/dt
+
+    We expose `velocity(x, u)` = dx/dt for the M4 fixed-point finder, and rates()
+    = phi(x) for the metabolic penalty.
+    """
+
+    def __init__(self, n_in=3, n_hid=256, n_out=2, dt=1.0, tau=10.0):
+        super().__init__()
+        self.n_in, self.n_hid, self.n_out = n_in, n_hid, n_out
+        self.alpha = dt / tau
+        self.w_in = nn.Linear(n_in, n_hid, bias=False)
+        self.w_rec = nn.Linear(n_hid, n_hid, bias=True)   # bias = b
+        self.w_out = nn.Linear(n_hid, n_out, bias=False)
+        nn.init.normal_(self.w_rec.weight, std=1.0 / np.sqrt(n_hid))  # ~unit spectral radius
+        nn.init.zeros_(self.w_rec.bias)
+
+    def velocity(self, x, u_t):
+        """dx/dt = -x + W_rec phi(x) + W_in u + b (continuous field; used at M4)."""
+        return -x + self.w_rec(torch.tanh(x)) + self.w_in(u_t)
+
+    def forward(self, u):
+        """u: (B, T, n_in) -> hidden X (B, T, n_hid), output z (B, T, n_out)."""
+        B, T, _ = u.shape
+        x = u.new_zeros(B, self.n_hid)
+        X = u.new_zeros(B, T, self.n_hid)
+        Z = u.new_zeros(B, T, self.n_out)
+        up = u.permute(1, 0, 2)
+        for t in range(T):
+            x = x + self.alpha * self.velocity(x, up[t])
+            X[:, t, :] = x
+            Z[:, t, :] = self.w_out(x)
+        return X, Z
+
+
+def train_reaching(n_hid=256, iters=1500, n_dirs=8, reps=8, T=60, go=20,
+                   lr=2e-3, metabolic=1e-3, seed=0, device="cpu", log_every=250):
+    """Train ReachingRNN on the reach task. Returns (model, vel_R2, log).
+
+    Loss = MSE(velocity) + metabolic * mean(rate^2). The metabolic term is
+    MANDATORY: without it the network finds a non-biological high-dimensional
+    solution (README M3); with it, rates stay bounded and the dynamics are
+    low-dimensional and rotational.
+    """
+    torch.manual_seed(seed)
+    model = ReachingRNN(n_hid=n_hid).to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=iters)
+    log = []
+    for it in range(iters):
+        u_np, v_np, _ = generate_reaching(n_dirs, reps, T, go, seed=seed + it + 1)
+        u = torch.from_numpy(u_np).to(device)
+        v = torch.from_numpy(v_np).to(device)
+        X, Z = model(u)
+        task = ((Z - v) ** 2).mean()
+        metab = metabolic * torch.tanh(X).pow(2).mean()
+        loss = task + metab
+        opt.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        opt.step()
+        sched.step()
+        if it % log_every == 0 or it == iters - 1:
+            log.append((it, float(task.detach()), float(metab.detach())))
+
+    with torch.no_grad():
+        u_np, v_np, _ = generate_reaching(n_dirs, reps, T, go, seed=77777)
+        u = torch.from_numpy(u_np).to(device); v = torch.from_numpy(v_np).to(device)
+        _, Z = model(u)
+        ss_res = ((Z - v) ** 2).sum()
+        ss_tot = ((v - v.mean()) ** 2).sum()
+        vel_r2 = float(1 - ss_res / ss_tot)
+    return model, vel_r2, log
+
+
+def reaching_condition_averaged(model, n_dirs=8, T=60, go=20, device="cpu"):
+    """Condition-averaged hidden states (n_dirs, T, n_hid) for jPCA on the RNN."""
+    with torch.no_grad():
+        u_np, _, didx = generate_reaching(n_dirs, reps=1, T=T, go=go, noise=0.0, seed=0)
+        X, _ = model(torch.from_numpy(u_np).to(device))
+    return X.cpu().numpy(), u_np       # already one trial per direction (reps=1)
