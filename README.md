@@ -1,5 +1,7 @@
 # neural-dynamics
 
+> 🇰🇷 한국어 번역본: [README.ko.md](README.ko.md) (구현 현황·다음 할 일 부록 포함)
+
 # Project: Reproducing Motor Cortex Dynamics + Interactive Web Visualization
 
 ## Purpose
