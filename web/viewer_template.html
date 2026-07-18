@@ -1,0 +1,435 @@
+<style>
+  /* ─ Deliberately dark, single-theme: a scientific "oscilloscope" stage where
+     bright trajectories must pop. System UI face by choice (SF/Segoe/Roboto);
+     monospace for numbers. ─ */
+  :root{
+    --ground:#0a0d13; --ground2:#0d121b; --panel:#121926; --panel2:#0f1520;
+    --line:#222e42; --line2:#1a2434;
+    --text:#dbe4f3; --muted:#8492aa; --faint:#5a6884;
+    --accent:#5eead4; --accent-dim:#2b6f66;
+    --stable:#34d399; --unstable:#f87171; --saddle:#fbbf24; --rotational:#c4b5fd;
+    --flow:#3f6fd6;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:radial-gradient(1200px 800px at 70% -10%, #10192a 0%, var(--ground) 55%);
+    color:var(--text); font-family:var(--sans);
+    -webkit-font-smoothing:antialiased; overflow:hidden;
+  }
+  #app{display:flex; flex-direction:column; height:100vh; width:100vw}
+
+  header{
+    display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
+    padding:14px 20px 12px; border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg, rgba(18,25,38,.7), rgba(18,25,38,0));
+  }
+  header h1{font-size:15px; font-weight:600; letter-spacing:.2px; margin:0}
+  header .sub{font-size:12px; color:var(--muted)}
+  header .spacer{flex:1}
+  .seg{display:inline-flex; border:1px solid var(--line); border-radius:8px; overflow:hidden}
+  .seg button{
+    background:transparent; color:var(--muted); border:0; cursor:pointer;
+    font:500 12px/1 var(--sans); padding:8px 13px; letter-spacing:.2px;
+    transition:background .15s,color .15s;
+  }
+  .seg button:hover{color:var(--text)}
+  .seg button[aria-pressed="true"]{background:var(--accent); color:#04211d}
+
+  main{position:relative; flex:1; min-height:0}
+  canvas{display:block; width:100%; height:100%; touch-action:none; cursor:grab}
+  canvas:active{cursor:grabbing}
+
+  /* floating control dock, lower-left */
+  .dock{
+    position:absolute; left:16px; bottom:16px; width:284px; max-width:calc(100% - 32px);
+    background:linear-gradient(180deg, rgba(19,26,39,.94), rgba(13,19,29,.94));
+    border:1px solid var(--line); border-radius:12px; padding:14px 15px;
+    backdrop-filter:blur(9px); box-shadow:0 12px 40px rgba(0,0,0,.45);
+    display:flex; flex-direction:column; gap:13px;
+  }
+  .row{display:flex; align-items:center; gap:10px}
+  .lab{font:600 10px/1 var(--sans); letter-spacing:1.3px; text-transform:uppercase; color:var(--faint)}
+  .play{
+    width:34px; height:34px; flex:0 0 auto; border-radius:8px; cursor:pointer;
+    border:1px solid var(--line); background:var(--panel2); color:var(--accent);
+    font-size:14px; display:grid; place-items:center;
+  }
+  .play:hover{border-color:var(--accent-dim)}
+  input[type=range]{-webkit-appearance:none; appearance:none; height:4px; flex:1;
+    background:var(--line); border-radius:3px; outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:14px; height:14px;
+    border-radius:50%; background:var(--accent); cursor:pointer; border:2px solid #04211d}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;
+    background:var(--accent);cursor:pointer;border:2px solid #04211d}
+  .tval{font:500 11px/1 var(--mono); color:var(--muted); min-width:52px; text-align:right}
+
+  .toggles{display:flex; flex-wrap:wrap; gap:7px}
+  .chip{
+    display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none;
+    border:1px solid var(--line); border-radius:7px; padding:6px 9px;
+    font:500 11px/1 var(--sans); color:var(--muted); background:var(--panel2);
+    transition:border-color .15s,color .15s;
+  }
+  .chip:hover{color:var(--text)}
+  .chip[data-on="1"]{color:var(--text); border-color:var(--accent-dim)}
+  .chip .sw{width:8px;height:8px;border-radius:2px;background:var(--faint)}
+  .chip[data-on="1"] .sw{background:var(--accent)}
+  .chip[disabled]{opacity:.32; cursor:not-allowed}
+
+  .mini{display:flex; align-items:center; gap:8px}
+  .mini .tval{min-width:34px}
+
+  /* legend + honesty note, upper-right */
+  .info{
+    position:absolute; right:16px; top:16px; width:250px; max-width:calc(100% - 32px);
+    display:flex; flex-direction:column; gap:11px;
+  }
+  .card{
+    background:linear-gradient(180deg, rgba(19,26,39,.9), rgba(13,19,29,.9));
+    border:1px solid var(--line); border-radius:11px; padding:12px 13px; backdrop-filter:blur(9px);
+  }
+  .card h3{margin:0 0 8px; font:600 10px/1 var(--sans); letter-spacing:1.3px;
+    text-transform:uppercase; color:var(--faint)}
+  .legrow{display:flex; align-items:center; gap:9px; font-size:12px; color:var(--muted); margin:5px 0}
+  .dot{width:10px;height:10px;border-radius:50%;flex:0 0 auto}
+  .bar{width:26px;height:4px;border-radius:2px;flex:0 0 auto}
+  .metric{display:flex;justify-content:space-between;font-size:12px;margin:4px 0;color:var(--muted)}
+  .metric b{color:var(--text); font:600 12px/1 var(--mono)}
+  .note{font-size:11.5px; line-height:1.5; color:var(--muted)}
+  .note b{color:var(--accent); font-weight:600}
+
+  /* fixed-point hover tooltip */
+  #tip{
+    position:absolute; pointer-events:none; z-index:20; display:none; max-width:250px;
+    background:rgba(9,13,20,.97); border:1px solid var(--line); border-radius:9px;
+    padding:9px 11px; box-shadow:0 8px 26px rgba(0,0,0,.5);
+  }
+  #tip .th{font:600 11px/1.2 var(--sans); margin-bottom:6px; display:flex; align-items:center; gap:7px}
+  #tip .eig{font:500 11px/1.55 var(--mono); color:var(--muted)}
+  #tip .eig .im{color:var(--accent)}
+  .badge{font:600 9px/1 var(--sans); letter-spacing:.6px; text-transform:uppercase;
+    padding:3px 6px; border-radius:5px}
+  @media (max-width:720px){ .info{display:none} .dock{width:calc(100% - 32px)} }
+  @media (prefers-reduced-motion:reduce){ *{transition:none !important} }
+</style>
+
+<div id="app">
+  <header>
+    <h1>Motor Cortex Dynamics</h1>
+    <span class="sub">rotational population dynamics — described (jPCA) &amp; generated (fixed points)</span>
+    <span class="spacer"></span>
+    <div class="seg" id="viewseg" role="group" aria-label="View">
+      <button data-view="brain" aria-pressed="false">Brain (M1)</button>
+      <button data-view="rnn" aria-pressed="true">RNN</button>
+      <button data-view="both" aria-pressed="false">Side&nbsp;by&nbsp;side</button>
+    </div>
+  </header>
+
+  <main>
+    <canvas id="c"></canvas>
+
+    <div class="dock">
+      <div class="row">
+        <button class="play" id="play" aria-label="Play/pause">▶</button>
+        <input type="range" id="time" min="0" max="1000" value="1000" aria-label="Time">
+        <span class="tval" id="tlabel">movement</span>
+      </div>
+      <div>
+        <div class="lab" style="margin-bottom:8px">Layers</div>
+        <div class="toggles">
+          <span class="chip" data-tog="plane" data-on="1"><span class="sw"></span>jPCA plane</span>
+          <span class="chip" data-tog="flow" data-on="1"><span class="sw"></span>flow field</span>
+          <span class="chip" data-tog="fp" data-on="1"><span class="sw"></span>fixed points</span>
+        </div>
+      </div>
+      <div>
+        <div class="row" style="justify-content:space-between; margin-bottom:8px">
+          <span class="lab">Conditions</span>
+          <span class="mini"><input type="range" id="ncond" min="1" max="100" value="100"
+                 style="width:96px" aria-label="Number of conditions"><span class="tval" id="nlabel">all</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="info">
+      <div class="card" id="metacard">
+        <h3 id="metatitle">RNN — task-trained</h3>
+        <div class="metric"><span>jPCA fit R²</span><b id="m_r2">—</b></div>
+        <div class="metric"><span>plane variance</span><b id="m_var">—</b></div>
+        <div class="metric" id="m_eigrow"><span>fixed-point eig</span><b id="m_eig">—</b></div>
+      </div>
+      <div class="card">
+        <h3>Fixed-point stability</h3>
+        <div class="legrow"><span class="dot" style="background:var(--stable)"></span>stable (attractor)</div>
+        <div class="legrow"><span class="dot" style="background:var(--saddle)"></span>saddle</div>
+        <div class="legrow"><span class="dot" style="background:var(--unstable)"></span>unstable</div>
+        <div class="legrow"><span class="dot" style="background:var(--rotational)"></span>rotational (center)</div>
+        <div class="legrow"><span class="bar" style="background:var(--flow)"></span>flow&nbsp;dx/dt</div>
+      </div>
+      <div class="card">
+        <h3>Why they differ</h3>
+        <p class="note"><b>Brain</b> gets trajectories + the jPCA plane only — we have no equations for it. <b>RNN</b> adds fixed points &amp; flow, because we <i>built</i> its equations. Fixed points <b>generate</b> the rotation jPCA <b>describes</b>. The two live in different state spaces — each shown in its own jPCA coordinates, matched by visual scale only.</p>
+      </div>
+    </div>
+
+    <div id="tip"></div>
+  </main>
+</div>
+
+<script>
+const DATA = { brain: __BRAIN_JSON__, rnn: __RNN_JSON__ };
+const STAB = {stable:'#34d399', unstable:'#f87171', saddle:'#fbbf24', rotational:'#c4b5fd'};
+
+// ── prepare a dataset: normalize to a shared visual scale, precompute hues ──
+function prep(d){
+  const ids = Object.keys(d.trajectories);
+  const pts = [];
+  ids.forEach(id => d.trajectories[id].forEach(p => pts.push(p)));
+  const c=[0,0,0]; pts.forEach(p=>{c[0]+=p[0];c[1]+=p[1];c[2]+=p[2]});
+  c[0]/=pts.length; c[1]/=pts.length; c[2]/=pts.length;
+  let s=0; pts.forEach(p=>{const dx=p[0]-c[0],dy=p[1]-c[1],dz=p[2]-c[2];
+    s=Math.max(s,Math.hypot(dx,dy,dz))});
+  s = s||1;
+  const N = ids.length;
+  const trajs = ids.map((id,i)=>({
+    id, hue: 360*i/N,
+    pts: d.trajectories[id].map(p=>[(p[0]-c[0])/s,(p[1]-c[1])/s,(p[2]-c[2])/s])
+  }));
+  const T = trajs[0] ? trajs[0].pts.length : 0;
+  const fps = (d.fixed_points||[]).map(f=>({
+    pos:[(f.pos[0]-c[0])/s,(f.pos[1]-c[1])/s,(f.pos[2]-c[2])/s],
+    eigs:f.eigs||[], stability:f.stability||'saddle', is_spiral:f.is_spiral
+  }));
+  const flow = (d.flow_field||[]).map(fv=>({
+    pos:[(fv.pos[0]-c[0])/s,(fv.pos[1]-c[1])/s,(fv.pos[2]-c[2])/s],
+    vec:[fv.vec[0]/s,fv.vec[1]/s,fv.vec[2]/s]
+  }));
+  // reference magnitude of the IN-PLANE flow (for opacity scaling)
+  const mags=flow.map(f=>Math.hypot(f.vec[0],f.vec[1])).filter(m=>m>1e-9).sort((a,b)=>a-b);
+  const flowRef = mags.length ? mags[Math.floor(mags.length/2)] : 1;
+  return {trajs, fps, flow, flowRef, T, meta:d.meta||{}, kind:d.meta?d.meta.kind:'?'};
+}
+const B = prep(DATA.brain), R = prep(DATA.rnn);
+
+const state = {view:'rnn', az:-0.45, el:0.62, zoom:1, t:1, playing:false,
+  layers:{plane:true, flow:true, fp:true}, ncond:1};
+
+// ── camera: orthographic rotate (yaw az, pitch el) ──
+function rot(p){
+  const ca=Math.cos(state.az), sa=Math.sin(state.az);
+  let x=p[0]*ca+p[2]*sa, z=-p[0]*sa+p[2]*ca, y=p[1];
+  const ce=Math.cos(state.el), se=Math.sin(state.el);
+  const y2=y*ce-z*se, z2=y*se+z*ce;
+  return [x,y2,z2];
+}
+const canvas=document.getElementById('c'), ctx=canvas.getContext('2d');
+let W=0,H=0,DPR=1;
+function resize(){
+  DPR=Math.min(window.devicePixelRatio||1,2);
+  W=canvas.clientWidth; H=canvas.clientHeight;
+  canvas.width=W*DPR; canvas.height=H*DPR; ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize',()=>{resize();draw()});
+
+function project(p, vp){
+  const r=rot(p);
+  const R0=Math.min(vp.w,vp.h)*0.34*state.zoom;
+  return {x:vp.cx+r[0]*R0, y:vp.cy-r[1]*R0, d:r[2]};
+}
+
+function drawGrid(vp){                       // the jPCA plane is jPC1-jPC2 = z=0
+  const g=6, ext=1.15;
+  ctx.lineWidth=1;
+  for(let i=-g;i<=g;i++){
+    const a=i/g*ext;
+    strokeLine([a,-ext,0],[a,ext,0],vp,'rgba(90,104,132,.10)');
+    strokeLine([-ext,a,0],[ext,a,0],vp,'rgba(90,104,132,.10)');
+  }
+  if(state.layers.plane){                     // highlighted plane fill (z=0)
+    const q=[[-ext,-ext,0],[ext,-ext,0],[ext,ext,0],[-ext,ext,0]].map(p=>project(p,vp));
+    ctx.beginPath(); ctx.moveTo(q[0].x,q[0].y);
+    q.slice(1).forEach(p=>ctx.lineTo(p.x,p.y)); ctx.closePath();
+    ctx.fillStyle='rgba(94,234,212,.05)'; ctx.fill();
+    ctx.strokeStyle='rgba(94,234,212,.22)'; ctx.lineWidth=1; ctx.stroke();
+  }
+}
+function strokeLine(a,b,vp,style){
+  const p=project(a,vp),q=project(b,vp);
+  ctx.strokeStyle=style; ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(q.x,q.y); ctx.stroke();
+}
+function drawFlow(ds,vp){
+  // Show the IN-PLANE component of dx/dt as short, uniform-length arrows lying
+  // in the jPCA plane (the standard flow-field reading). Opacity encodes speed,
+  // so the swirl is legible without long arrows shooting out of the plane.
+  ctx.lineWidth=1;
+  const L=0.06;                                   // arrow length in normalized units
+  ds.flow.forEach(f=>{
+    const m=Math.hypot(f.vec[0],f.vec[1]); if(m<1e-6) return;
+    const dx=f.vec[0]/m*L, dy=f.vec[1]/m*L;
+    const a=project(f.pos,vp);
+    const b=project([f.pos[0]+dx, f.pos[1]+dy, f.pos[2]],vp);
+    const al=Math.min(.6,.12+0.4*m/ds.flowRef);
+    ctx.strokeStyle='rgba(63,111,214,'+al+')';
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+    const ang=Math.atan2(b.y-a.y,b.x-a.x), h=3.0;   // arrowhead
+    ctx.beginPath(); ctx.moveTo(b.x,b.y);
+    ctx.lineTo(b.x-h*Math.cos(ang-0.45),b.y-h*Math.sin(ang-0.45));
+    ctx.moveTo(b.x,b.y);
+    ctx.lineTo(b.x-h*Math.cos(ang+0.45),b.y-h*Math.sin(ang+0.45)); ctx.stroke();
+  });
+}
+function activeConds(ds){
+  const n=Math.max(1,Math.min(ds.trajs.length,state.ncond));
+  if(n>=ds.trajs.length) return ds.trajs;
+  const step=ds.trajs.length/n, out=[];
+  for(let i=0;i<n;i++) out.push(ds.trajs[Math.floor(i*step)]);
+  return out;
+}
+function drawTrajs(ds,vp){
+  const idx=Math.max(1,Math.floor(state.t*(ds.T-1)));
+  activeConds(ds).forEach(tr=>{
+    ctx.strokeStyle='hsl('+tr.hue+',72%,60%)'; ctx.lineWidth=1.7;
+    ctx.lineJoin='round'; ctx.beginPath();
+    for(let i=0;i<=idx;i++){const p=project(tr.pts[i],vp); i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y);}
+    ctx.stroke();
+    const h=project(tr.pts[idx],vp);        // moving head
+    ctx.fillStyle='hsl('+tr.hue+',78%,66%)';
+    ctx.beginPath(); ctx.arc(h.x,h.y,2.6,0,7); ctx.fill();
+  });
+}
+let fpScreen=[];
+function drawFPs(ds,vp){
+  fpScreen=[];
+  ds.fps.forEach(f=>{
+    const p=project(f.pos,vp), col=STAB[f.stability]||'#fff';
+    ctx.strokeStyle=col; ctx.lineWidth=2.4; const r=6;
+    ctx.beginPath(); ctx.moveTo(p.x-r,p.y-r); ctx.lineTo(p.x+r,p.y+r);
+    ctx.moveTo(p.x+r,p.y-r); ctx.lineTo(p.x-r,p.y+r); ctx.stroke();
+    ctx.fillStyle=col+'22'; ctx.beginPath(); ctx.arc(p.x,p.y,9,0,7); ctx.fill();
+    fpScreen.push({x:p.x+vp.ox, y:p.y, f});
+  });
+}
+function drawAxes(vp){
+  const L=1.02, ax=[['jPC1',[L,0,0]],['jPC2',[0,L,0]],['jPC3',[0,0,L]]];
+  ctx.font='11px '+getComputedStyle(document.body).getPropertyValue('--mono');
+  ax.forEach(([lab,v])=>{
+    const o=project([0,0,0],vp), p=project(v,vp);
+    ctx.strokeStyle='rgba(132,146,170,.35)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(o.x,o.y); ctx.lineTo(p.x,p.y); ctx.stroke();
+    ctx.fillStyle='rgba(132,146,170,.7)'; ctx.fillText(lab,p.x+3,p.y-2);
+  });
+}
+function panelLabel(txt,vp,mech){
+  ctx.font='600 12px '+getComputedStyle(document.body).getPropertyValue('--sans');
+  ctx.fillStyle='#dbe4f3'; ctx.fillText(txt,vp.cx-vp.w/2+16,vp.cy-vp.h/2+22);
+  ctx.font='11px '+getComputedStyle(document.body).getPropertyValue('--sans');
+  ctx.fillStyle=mech?'#8492aa':'#7d8aa0';
+  ctx.fillText(mech?'trajectories + jPCA + fixed points + flow':'trajectories + jPCA plane (no equations)',
+    vp.cx-vp.w/2+16, vp.cy-vp.h/2+40);
+}
+function renderPanel(ds,vp,title){
+  drawGrid(vp); drawAxes(vp);
+  if(ds.kind==='rnn' && state.layers.flow) drawFlow(ds,vp);
+  drawTrajs(ds,vp);
+  if(ds.kind==='rnn' && state.layers.fp) drawFPs(ds,vp);
+  panelLabel(title,vp,ds.kind==='rnn');
+}
+function draw(){
+  ctx.clearRect(0,0,W,H); fpScreen=[];
+  if(state.view==='both'){
+    const half=W/2;
+    renderPanel(B,{cx:half*0.5,cy:H/2,w:half,h:H,ox:0},'Brain · M1');
+    ctx.strokeStyle='rgba(34,46,66,.9)'; ctx.beginPath(); ctx.moveTo(half,10); ctx.lineTo(half,H-10); ctx.stroke();
+    const saved=fpScreen; fpScreen=[];
+    renderPanel(R,{cx:half*1.5,cy:H/2,w:half,h:H,ox:0},'RNN · task-trained');
+  }else{
+    const ds=state.view==='brain'?B:R;
+    renderPanel(ds,{cx:W/2,cy:H/2,w:W,h:H,ox:0},state.view==='brain'?'Brain · M1':'RNN · task-trained');
+  }
+}
+
+// ── interaction: orbit + zoom ──
+let drag=null;
+canvas.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY}; canvas.setPointerCapture(e.pointerId)});
+canvas.addEventListener('pointermove',e=>{
+  if(drag){
+    state.az+=(e.clientX-drag.x)*0.008; state.el+=(e.clientY-drag.y)*0.008;
+    state.el=Math.max(-1.4,Math.min(1.4,state.el)); drag={x:e.clientX,y:e.clientY}; draw();
+  } else hover(e);
+});
+canvas.addEventListener('pointerup',e=>{drag=null});
+canvas.addEventListener('pointerleave',()=>{drag=null; document.getElementById('tip').style.display='none'});
+canvas.addEventListener('wheel',e=>{e.preventDefault();
+  state.zoom*=e.deltaY<0?1.08:0.925; state.zoom=Math.max(0.3,Math.min(4,state.zoom)); draw();
+},{passive:false});
+
+const tip=document.getElementById('tip');
+function hover(e){
+  const r=canvas.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+  let hit=null;
+  for(const s of fpScreen){ if(Math.hypot(mx-s.x,my-s.y)<12){hit=s; break;} }
+  if(hit){
+    const f=hit.f, col=STAB[f.stability]||'#fff';
+    const eigs=f.eigs.slice(0,6).map(e=>{
+      const im=e[1]>=0?'+'+e[1].toFixed(2):e[1].toFixed(2);
+      return '<span>'+e[0].toFixed(2)+'<span class="im">'+im+'i</span></span>';
+    }).join('<br>');
+    tip.innerHTML='<div class="th"><span class="badge" style="background:'+col+'22;color:'+col+'">'+
+      f.stability+(f.is_spiral?' · spiral':'')+'</span></div>'+
+      '<div class="eig">Jacobian eigenvalues (top):<br>'+eigs+'</div>';
+    tip.style.display='block';
+    tip.style.left=Math.min(mx+14,W-260)+'px'; tip.style.top=(my+14)+'px';
+  } else tip.style.display='none';
+}
+
+// ── UI wiring ──
+document.querySelectorAll('#viewseg button').forEach(b=>b.addEventListener('click',()=>{
+  state.view=b.dataset.view;
+  document.querySelectorAll('#viewseg button').forEach(x=>x.setAttribute('aria-pressed',x===b));
+  syncMeta(); draw();
+}));
+const timeEl=document.getElementById('time'), tlabel=document.getElementById('tlabel');
+timeEl.addEventListener('input',()=>{state.t=+timeEl.value/1000; state.playing=false;
+  document.getElementById('play').textContent='▶'; tlabel.textContent=state.t>=0.999?'movement':'t='+state.t.toFixed(2); draw()});
+const playBtn=document.getElementById('play');
+playBtn.addEventListener('click',()=>{state.playing=!state.playing; playBtn.textContent=state.playing?'❚❚':'▶';
+  if(state.playing) tick()});
+function tick(){
+  if(!state.playing) return;
+  state.t+=0.012; if(state.t>1) state.t=0;
+  timeEl.value=state.t*1000; tlabel.textContent=state.t>=0.999?'movement':'t='+state.t.toFixed(2);
+  draw(); requestAnimationFrame(tick);
+}
+document.querySelectorAll('.chip[data-tog]').forEach(ch=>ch.addEventListener('click',()=>{
+  if(ch.hasAttribute('disabled')) return;
+  const k=ch.dataset.tog; state.layers[k]=!state.layers[k];
+  ch.dataset.on=state.layers[k]?'1':'0'; draw();
+}));
+const ncondEl=document.getElementById('ncond'), nlabel=document.getElementById('nlabel');
+function condMax(){return (state.view==='brain'?B:R).trajs.length}
+ncondEl.addEventListener('input',()=>{
+  const frac=+ncondEl.value/100; state.ncond=Math.max(1,Math.round(frac*condMax()));
+  nlabel.textContent=state.ncond>=condMax()?'all':state.ncond; draw();
+});
+function syncMeta(){
+  const isBrain=state.view==='brain';
+  const ds=isBrain?B:R, m=ds.meta;
+  document.getElementById('metatitle').textContent=isBrain?'Brain — Churchland 2012':'RNN — task-trained';
+  document.getElementById('m_r2').textContent=(m.fit_R2??'—');
+  document.getElementById('m_var').textContent=(m.plane_var_frac??'—');
+  const eigrow=document.getElementById('m_eigrow');
+  if(m.lead_eig){eigrow.style.display='flex';
+    document.getElementById('m_eig').textContent=m.lead_eig[0].toFixed(2)+(m.lead_eig[1]>=0?'+':'')+m.lead_eig[1].toFixed(2)+'i';
+  } else eigrow.style.display='none';
+  // brain: disable mechanism layers
+  const brainDisabled=state.view==='brain';
+  document.querySelectorAll('.chip[data-tog="flow"],.chip[data-tog="fp"]').forEach(ch=>{
+    if(brainDisabled){ch.setAttribute('disabled','');} else ch.removeAttribute('disabled');
+  });
+  state.ncond=condMax(); ncondEl.value=100; nlabel.textContent='all';
+}
+resize(); syncMeta(); draw();
+</script>
