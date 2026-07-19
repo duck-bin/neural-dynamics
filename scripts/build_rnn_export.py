@@ -18,9 +18,23 @@ from python import rnn, fixedpoints as fp, pca_jpca as J, export as E  # noqa: E
 WIN = slice(15, 45)
 
 
-def main():
+def get_model():
+    """Load the cached reaching RNN, or train + cache it (so this runs standalone)."""
+    ckpt = REPO / "cache" / "reaching_metab.pt"
     model = rnn.ReachingRNN(n_hid=256)
-    model.load_state_dict(torch.load(REPO / "cache" / "reaching_metab.pt", map_location="cpu"))
+    if ckpt.exists():
+        model.load_state_dict(torch.load(ckpt, map_location="cpu"))
+    else:
+        print("cache/reaching_metab.pt not found — training the reaching RNN (~90s)...")
+        model, _, _ = rnn.train_reaching(n_hid=256, iters=800, n_dirs=16, reps=8,
+                                         lr=2e-3, metabolic=1e-3, seed=0)
+        ckpt.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(model.state_dict(), ckpt)
+    return model
+
+
+def main():
+    model = get_model()
     model.eval()
     for p in model.parameters():
         p.requires_grad_(False)
