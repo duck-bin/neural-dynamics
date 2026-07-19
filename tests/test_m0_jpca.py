@@ -37,8 +37,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from python import pca_jpca as J  # noqa: E402
 
-from jPCA import JPCA  # noqa: E402
-from jPCA.regression import skew_sym_regress  # noqa: E402
+# NOTE: the Antin `jPCA` oracle is imported LAZILY inside main(), not at module top,
+# so `from tests.test_m0_jpca import make_synthetic` (used by the M0 notebook cell)
+# works even if the reference package is not installed. Only the full differential
+# test needs it.
 
 
 # --------------------------------------------------------------------------
@@ -111,6 +113,9 @@ def ground_truth_frequency():
 
 
 def main():
+    from jPCA import JPCA                          # the oracle — only the full test needs it
+    from jPCA.regression import skew_sym_regress
+
     datas, omega_true = make_synthetic()
     C, T, N = datas.shape
     print(f"synthetic data: C={C} conditions, T={T} bins, N={N} neurons")
