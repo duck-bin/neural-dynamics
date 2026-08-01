@@ -20,6 +20,7 @@ PCA) is applied downstream in pca_jpca.py, exactly as for any jPCA input.
 
 from __future__ import annotations
 
+import hashlib
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,11 @@ CHURCHLAND_URL = (
     "https://raw.githubusercontent.com/nwb4edu/nwb4edu.github.io/"
     "master/Lesson_5/exampleData.mat"
 )
+# The URL above points at a BRANCH of a third-party mirror, so its contents could
+# change without notice — and then every number in this repo would silently refer
+# to different data. Pin the exact bytes we verified (108 conditions x 61 bins x
+# 218 neurons) so a changed mirror fails loudly instead of quietly.
+CHURCHLAND_SHA256 = "e0858f01abcc61c8f86d9a3fc3ddf8a2dc4ae3c29ebbe34b88d92566877c2513"
 
 
 @dataclass
@@ -48,6 +54,19 @@ def _download(url: str, dest: Path) -> None:
     urllib.request.urlretrieve(url, dest)
 
 
+def _verify_sha256(path: Path, expected: str) -> None:
+    """Fail loudly if the data bytes are not the ones every reported number used."""
+    actual = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual != expected:
+        raise RuntimeError(
+            f"Checksum mismatch for {path}.\n"
+            f"  expected {expected}\n  actual   {actual}\n"
+            "The upstream mirror may have changed, or the cached file is corrupt. "
+            "Delete the file to re-download. Do NOT trust reported numbers until "
+            "this matches (see README section 9)."
+        )
+
+
 def load_churchland(cache_dir="cache", filename="churchland_exampleData.mat") -> ReachData:
     """Load the Churchland 2012 reaching data as (C, T, N) firing rates.
 
@@ -58,6 +77,7 @@ def load_churchland(cache_dir="cache", filename="churchland_exampleData.mat") ->
     path = Path(cache_dir) / filename
     if not path.exists():
         _download(CHURCHLAND_URL, path)
+    _verify_sha256(path, CHURCHLAND_SHA256)   # reproducibility: pin the exact bytes
 
     mat = sio.loadmat(str(path))
     conditions = mat["Data"][0]                       # struct array, one per condition

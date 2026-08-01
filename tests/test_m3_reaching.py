@@ -70,6 +70,10 @@ def main():
     print("=== jPCA on RNN hidden states (movement epoch) ===")
     print(f"fit R^2 (skew): {res.fit_R2:.4f}")
     print(f"top rotation-plane variance fraction: {res.plane_var_frac:.4f}")
+    s, f, r = J.skew_over_full(res)
+    print(f"R2(skew)/R2(full): {r:.4f}   (skew {s:.4f} / full {f:.4f})")
+    print(f"  -> rotation accounts for {100*r:.0f}% of the linearly explainable")
+    print("     derivative structure; comparable to the same ratio on brain data.")
     print(f"participation ratio (with metabolic): {participation_ratio(Xc[:, WIN, :]):.2f}\n")
 
     checks = {

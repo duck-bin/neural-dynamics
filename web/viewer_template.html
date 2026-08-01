@@ -122,7 +122,7 @@
     <span class="sub">rotational population dynamics — described (jPCA) &amp; generated (fixed points)</span>
     <span class="spacer"></span>
     <div class="seg" id="viewseg" role="group" aria-label="View">
-      <button data-view="brain" aria-pressed="false">Brain (M1)</button>
+      <button data-view="brain" aria-pressed="false">Brain · motor cortex</button>
       <button data-view="rnn" aria-pressed="true">RNN</button>
       <button data-view="both" aria-pressed="false">Side&nbsp;by&nbsp;side</button>
     </div>
@@ -341,13 +341,13 @@ function draw(){
   ctx.clearRect(0,0,W,H); fpScreen=[];
   if(state.view==='both'){
     const half=W/2;
-    renderPanel(B,{cx:half*0.5,cy:H/2,w:half,h:H,ox:0},'Brain · M1');
+    renderPanel(B,{cx:half*0.5,cy:H/2,w:half,h:H,ox:0},'Brain · motor cortex');
     ctx.strokeStyle='rgba(34,46,66,.9)'; ctx.beginPath(); ctx.moveTo(half,10); ctx.lineTo(half,H-10); ctx.stroke();
     const saved=fpScreen; fpScreen=[];
     renderPanel(R,{cx:half*1.5,cy:H/2,w:half,h:H,ox:0},'RNN · task-trained');
   }else{
     const ds=state.view==='brain'?B:R;
-    renderPanel(ds,{cx:W/2,cy:H/2,w:W,h:H,ox:0},state.view==='brain'?'Brain · M1':'RNN · task-trained');
+    renderPanel(ds,{cx:W/2,cy:H/2,w:W,h:H,ox:0},state.view==='brain'?'Brain · motor cortex':'RNN · task-trained');
   }
 }
 
