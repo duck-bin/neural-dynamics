@@ -17,7 +17,7 @@ HONESTY NOTE (adversarial): in this simplified 16-direction task that effect doe
 NOT reproduce — an ablation leaves the participation ratio essentially unchanged
 (both ~2.5), because the task is simple enough that even the unregularized
 solution is low-dimensional. We keep the penalty for faithfulness and report the
-null result; see NOTES "M3" and "Proposed deviations".
+null result; see README section 6 (M3 sweep table) and section 9 (decision D2).
 """
 
 import sys
