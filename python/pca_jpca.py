@@ -208,6 +208,25 @@ def fit_R2(X: np.ndarray, Xdot: np.ndarray, M: np.ndarray) -> float:
     return 1.0 - float(np.sum(resid ** 2) / np.sum(Xdot ** 2))
 
 
+def skew_over_full(result) -> tuple[float, float, float]:
+    """(R2_skew, R2_full, ratio) — how much of the LINEARLY explainable derivative
+    structure is rotational.
+
+    WHY this and not R2 alone: a low fit R2 is ambiguous. It can mean "rotation is
+    weak" OR "a linear dynamical model fits this data poorly in the first place".
+    Dividing by the unconstrained (full, non-skew) least-squares ceiling separates
+    the two: the ratio is the fraction of the linearly-explainable derivative
+    structure that pure rotation accounts for. It is also what makes brain and RNN
+    comparable, since their absolute R2 ceilings differ.
+
+    Takes a JPCAResult; returns floats.
+    """
+    X, Xdot = finite_diff(result.pre.reduced)
+    M_unc = np.linalg.lstsq(X, Xdot, rcond=None)[0].T      # unconstrained ceiling
+    r2_full = 1.0 - float(np.sum((Xdot - X @ M_unc.T) ** 2) / np.sum(Xdot ** 2))
+    return float(result.fit_R2), r2_full, float(result.fit_R2 / r2_full)
+
+
 def plane_variance_fraction(reduced: np.ndarray, plane: np.ndarray) -> float:
     """Fraction of the reduced data's variance captured by a 2D plane."""
     C, T, k = reduced.shape

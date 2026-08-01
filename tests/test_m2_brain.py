@@ -49,7 +49,12 @@ def main():
     print("=== hand jPCA (cross-condition-mean subtracted) ===")
     print(f"fit R^2 (Xdot = X M^T, skew)        : {res.fit_R2:.4f}")
     print(f"top rotation-plane variance fraction: {res.plane_var_frac:.4f}")
-    print(f"rotation frequency                  : {hz(res.omega, tw):.2f} Hz\n")
+    print(f"rotation frequency                  : {hz(res.omega, tw):.2f} Hz")
+    s, f, r = J.skew_over_full(res)
+    print(f"R2(skew)/R2(full)                   : {r:.4f}   (skew {s:.4f} / full {f:.4f})")
+    print("  -> of the derivative structure a LINEAR model can explain at all,")
+    print(f"     rotation accounts for {100*r:.0f}%. This separates 'rotation is weak'")
+    print("     from 'linear dynamics itself is weak' — R2 alone cannot.\n")
 
     # ---- differential test vs Antin on IDENTICAL real data ----
     datas = [X[c] for c in range(X.shape[0])]
@@ -70,6 +75,7 @@ def main():
     print(f"fit R^2       no-CCM {res0.fit_R2:.4f}  vs  CCM {res.fit_R2:.4f}")
     print(f"plane var frac no-CCM {res0.plane_var_frac:.4f}  vs  CCM {res.plane_var_frac:.4f}")
     print(f"frequency      no-CCM {hz(res0.omega, tw):.2f} Hz  vs  CCM {hz(res.omega, tw):.2f} Hz")
+    print(f"R2(skew)/R2(full) no-CCM {J.skew_over_full(res0)[2]:.4f}  vs  CCM {r:.4f}")
     print("=> rotation SURVIVES without CCM (not a CCM artifact); CCM isolates the")
     print("   condition-DEPENDENT rotation (Churchland's claim) and changes the freq.\n")
 
