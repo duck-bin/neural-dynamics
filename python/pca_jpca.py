@@ -21,7 +21,7 @@ a strong correctness check. (Cite: Churchland et al. 2012, Nature, supp. methods
 
 Algorithm steps are a FIXED commitment (README M0, steps 1-7). Do not silently
 alter the ordering, the cross-condition-mean subtraction, or the skew-symmetric
-constraint; propose changes in NOTES "Proposed deviations".
+constraint; they are the fixed commitments listed in README section 7.
 """
 
 from __future__ import annotations

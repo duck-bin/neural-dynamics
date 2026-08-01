@@ -1,204 +1,512 @@
-# neural-dynamics
+# 운동피질 회전 동역학: **무엇이 보이는가(jPCA)** 에서 **왜 그런가(고정점)** 까지
 
-> 🇰🇷 한국어 번역본: [README.ko.md](README.ko.md) (구현 현황·다음 할 일 부록 포함)
+> 실제 원숭이 운동피질 데이터에서 **회전**을 찾아내고(기술), 같은 과제를 학습한 RNN에서 그 회전을
+> **만들어내는 구조**를 찾아낸다(기전). 두 고전 논문의 재현 + 인터랙티브 3D 뷰어.
+>
+> **구현 + 학습**이 목적입니다. 이 문서 하나로 개념 → 실행 → 결과 → 한계까지 전부 다룹니다.
+> *(영어판은 추후 추가 예정)*
 
-# Project: Reproducing Motor Cortex Dynamics + Interactive Web Visualization
+**🔗 라이브 뷰어:** https://claude.ai/code/artifact/c5973882-5425-4fc5-8a00-16d68de0ffc9
+**📓 노트북:** `notebook/motor_dynamics.ipynb` (Colab에서 위→아래로 실행)
 
-## Purpose
-Reproduce two classic results in motor-cortex population dynamics and build an
-interactive, shareable web visualization that lets you SEE the dynamics.
-This is for implementation + learning. For every non-trivial design choice,
-explain in NOTES.md and code comments WHY this choice and what you rejected.
+---
 
-- Stage 1 (descriptive): PCA + jPCA on real M1 data → rotational dynamics
-  (Churchland et al. 2012, Nature 487:51-56)
-- Stage 2 (mechanistic): fixed-point analysis of a task-trained RNN → the local
-  structure that GENERATES the rotation
-  (Sussillo & Barak 2013, Neural Computation 25(3):626-649;
-   Sussillo et al. 2015, Nat Neurosci 18(7):1025-1033)
+## 0. 이 프로젝트가 답하는 질문
 
-Conceptual relationship to respect throughout:
-- jPCA is DESCRIPTIVE. It fits one global linear system to trajectory geometry.
-  Requires no equations. Applies to BOTH brain data and RNN hidden states.
-- Fixed-point analysis is MECHANISTIC. It needs the system's equations, so it
-  applies to the RNN ONLY (we do not have the brain's equations).
-- Fixed points GENERATE the rotation that jPCA DESCRIBES. One explains the other;
-  they are not two things "compared against each other."
-- Therefore: brain gets trajectories + jPCA plane only (no fixed points).
-  RNN gets trajectories + jPCA + fixed points + flow field.
-  The viewer must make this asymmetry visible.
+> **"팔을 뻗을 때 운동피질 뉴런들은 어떻게 함께 움직이며, 그 패턴은 *왜* 생기는가?"**
 
-## Development environment: Google Colab (primary) + static web app (deploy)
-Split the system into two layers connected by JSON. Do not make them compete.
+이 질문은 **두 층**으로 나뉘고, 이 구분이 프로젝트 전체를 지배합니다.
 
-- COLAB NOTEBOOK = the kitchen. Runs the full pipeline, teaches the math, gives
-  immediate inline feedback via plotly 3D (orbit built in) + ipywidgets sliders.
-  Exports results to /data/*.json. Structure every section as:
-  (1) markdown cell: the math and the "why", 
-  (2) code cell: implementation, 
-  (3) inline plotly cell: see the result immediately, 
-  (4) markdown cell: interpretation + failure modes observed.
-  First cell: mount Google Drive and cache MC_Maze + trained weights there, so
-  sessions do not re-download/re-train (Colab filesystem is ephemeral).
+| | **1층 · 기술 (descriptive)** | **2층 · 기전 (mechanistic)** |
+|---|---|---|
+| 도구 | **jPCA** | **고정점 분석 (fixed points)** |
+| 묻는 것 | 무엇처럼 **보이나** | **왜** 그런가 |
+| 필요한 것 | 궤적(관측)만 | **방정식** `dx/dt` |
+| 적용 대상 | **뇌 + RNN 둘 다** | **RNN만** |
 
-- STATIC WEB APP = the plate. React + Vite + react-three-fiber. Loads the exported
-  JSON and renders with Three.js. No live compute, no server, no browser storage.
-  Deploy to Hugging Face Spaces (Static SDK) for a shareable URL with ML-community
-  discoverability. (GitHub Pages is an acceptable fallback.)
+### 🔑 이 프로젝트를 관통하는 한 문장
+> **jPCA는 뇌와 RNN의 궤적에서 회전을 *본다(기술)*. 하지만 *왜* 도는지는 방정식이 있는 RNN에서만
+> 물을 수 있고(M4), 그 답이 복소 고유값 `±1.33i` 를 가진 회전 안장점 — 이것이 회전을 *생성한다(기전)*.**
 
-Rationale: Colab interactive outputs die with the session and are not a shareable
-link. plotly gives the "see it now" loop during development; Three.js gives the
-deployable artifact. Build the plotly version first; upgrade to Three.js if time
-remains.
+⚠️ **흔한 오해:** 이건 "뇌와 RNN을 서로 비교"하는 게 아닙니다. **고정점이 원인, 회전이 결과**이고,
+하나가 다른 하나를 **설명**합니다. 그래서 뷰어에서도 뇌 패널엔 고정점이 **없습니다** — 뇌의 방정식이
+없으니 원인을 물을 수가 없기 때문입니다. 이 **비대칭**이 결론이지, 결함이 아닙니다.
 
-## Repository structure
-/notebook
-  motor_dynamics.ipynb   # the Colab notebook (kitchen)
-/python                  # importable modules the notebook calls (keep logic here, not in cells)
-  data.py                # MC_Maze loading (nlb_tools), 20ms bins, Gaussian smooth (σ=40ms)
-  pca_jpca.py            # PCA + jPCA (hand implementation, see spec below)
-  rnn.py                 # 3-bit flip-flop RNN + reaching RNN
-  fixedpoints.py         # PyTorch-autograd fixed/slow point finder + Jacobian + stability
-  flowfield.py           # vector field dx/dt on a grid in PCA plane
-  export.py              # serialize results to web JSON
-/web                     # Vite + react-three-fiber app (plate)
-/data                    # exported JSON
-NOTES.md                 # math + design rationale + rejected alternatives (learning artifact)
+---
 
-## Differential-test policy (IMPORTANT — this is how we make the hand code falsifiable)
-For the two hard algorithms, implement BY HAND as the primary path, then verify
-against a maintained reference on IDENTICAL input. The reference is the oracle,
-not a fallback. If hand and reference disagree beyond tolerance, one is wrong —
-debug before proceeding. Keep both in the code; do not comment the reference out.
+## 1. 목표 — 무엇을 어떤 순서로
 
-- jPCA reference: Benjamin Antin's `jPCA` Python package (pip). 
-  Agreement test: principal angle between hand-derived and reference jPC planes
-  < 5 degrees; recovered rotation frequencies match within 5%.
-- Fixed-point reference: a lightweight PyTorch implementation of Sussillo & Barak
-  (e.g. the `tripdancer0916/pytorch-fixed-point-analysis` repo). Do NOT pull in
-  the TensorFlow FixedPointFinder — it fights the PyTorch stack. 
-  Agreement test: on the flip-flop, both find 8 stable fixed points near cube
-  corners; on the reaching RNN, fixed-point sets match after Hungarian alignment
-  within tolerance.
+각 단계는 **반증 가능한 합격 기준**을 갖습니다. 통과 못 하면 다음으로 가지 않습니다.
 
-## Data
-- Primary: MC_Maze (Neural Latents Benchmark '21, Pei et al. 2021), via nlb_tools.
-  Align on movement onset. Use prep + movement epochs. 20 ms bins, Gaussian smooth
-  σ=40 ms, soft-normalize firing rates (Churchland-style: rate/(range+5)).
-- If MC_Maze access fails, report it explicitly and propose an alternative PUBLIC
-  reaching dataset. Do NOT substitute synthetic data — reproduction becomes meaningless.
+| 단계 | 목표 | 왜 이 순서인가 | 합격 기준 |
+|---|---|---|---|
+| **M0** | jPCA를 **직접 구현** | 모든 분석의 도구부터 만든다 | 레퍼런스와 평면 각도 **< 5°**, 주파수 **< 5%** |
+| **M1** | 플립플롭 RNN + 고정점 탐색기 | **정답을 아는** 문제로 도구를 먼저 검증 | 큐브 꼭짓점에 **정확히 8개** 안정 고정점 |
+| **M2** | 실제 뇌 데이터에 jPCA | 이제 도구를 믿을 수 있으니 실데이터로 | 적합 R², 회전 평면 분산 보고 |
+| **M3** | 도달 RNN을 **과제로** 학습 + jPCA | 뇌 대신 "속을 볼 수 있는" 모델 확보 | **속도 R² > 0.90** (실패 모델 분석은 무의미) |
+| **M4** | RNN 고정점 + 흐름장 | 드디어 **"왜"** 를 묻는다 | 고정점 존재 + IC 재샘플링/독립솔버 일치 |
+| **M5** | 통합 뷰어 + 배포 | 비대칭을 눈에 보이게 | 3개 뷰 렌더 + 고정점 호버 툴팁 |
 
-## Pipeline (implementation order = milestones, each with a falsifiable pass/fail)
+**핵심 설계 원칙 — "아는 데서 먼저 검증한다":**
+M1(플립플롭)이 M2~M4보다 **먼저** 오는 이유입니다. 정답을 모르는 데이터에 도구를 쓰기 전에,
+정답이 알려진 장난감 문제(3비트 = 2³ = 8개 상태)에서 탐색기가 정확히 8개를 찾는지 확인합니다.
+여기서 실패하면 **멈추고 디버그**합니다.
 
-### M0. jPCA hand implementation, spec at sentence granularity
-1. Take condition-averaged firing rates X_c(t) per condition c.
-2. Soft-normalize each neuron; subtract the cross-condition mean at each timepoint
-   (this is the step Lebedev et al. 2019 criticized — note it in NOTES, keep it for
-   faithful reproduction, and save a before/after comparison).
-3. PCA on the stacked, preprocessed data; keep top k=6 PCs. Project to get X (k-dim).
-4. Compute state derivative Ẋ by finite difference.
-5. Fit Ẋ = M X constrained to M skew-symmetric (M = -Mᵀ): vectorize, solve the
-   constrained least squares in closed form (this is the crux — get the constraint
-   right, cite Churchland 2012 supplementary methods).
-6. Eigendecompose M; eigenvalues are purely imaginary (±iω pairs). The pair with
-   largest |ω| defines the top jPC plane.
-7. Project trajectories onto the jPC plane; they should sweep out rotations.
-PASS/FAIL: fit R² of Ẋ=MX reported; top rotation-plane variance fraction reported;
-differential test vs Antin `jPCA` passes.
+---
 
-### M1. Instrument calibration: flip-flop (known answer) — DO THIS FIRST
-- Train a small vanilla tanh RNN on the 3-bit flip-flop task (Sussillo & Barak 2013).
-- Run fixedpoints.py.
-- FALSIFICATION TEST: exactly 8 stable fixed points, located near the corners of a
-  cube in state space. If not, STOP and debug the finder before touching reaching data.
-- Render these 8 fixed points + trajectories in the minimal viewer (this also
-  validates the visualization pipeline on a known-answer case).
+## 2. 먼저 5분: 눈으로 보기
 
-### M2. Brain data: PCA + jPCA (Stage 1)
-- Apply M0 pipeline to MC_Maze.
-- Brain viewer: per-condition trajectories + highlighted jPCA rotation plane.
-  No fixed points (no equations).
+[**라이브 뷰어**](https://claude.ai/code/artifact/c5973882-5425-4fc5-8a00-16d68de0ffc9)를 열고 상단 **"Side by side"** 클릭.
 
-### M3. Reaching RNN + jPCA (Stage 2, part 1)
-- KEY CONCEPT (make explicit in NOTES): the RNN is trained on the BEHAVIORAL TASK,
-  NOT on neural data. Inputs = target/condition cue + go signal. Output = hand
-  velocity (or EMG). We then ask whether the EMERGENT hidden dynamics resemble M1.
-  (This is the Sussillo et al. 2015 method; conflating it with "fit the RNN to
-  spikes" is the classic fatal misunderstanding.)
-- RNN spec: 256 units, tanh, continuous-time dx/dt = -x + W_rec·φ(x) + W_in·u + b,
-  z = W_out·x. Metabolic regularization (L2 on firing rates) is MANDATORY — without
-  it the network finds a non-biological high-dimensional solution.
-- PASS/FAIL: report task performance (velocity R²) and require it above threshold
-  BEFORE any dynamics analysis (analyzing a network that failed the task is meaningless).
-- Apply the same PCA/jPCA to hidden states → does the RNN rotate too?
+- **왼쪽 (뇌)**: 궤적 + jPCA 평면. **X 표시(고정점) 없음.**
+- **오른쪽 (RNN)**: 궤적 + 평면 + **X(고정점)** + **파란 화살표(흐름장)**
+- X에 마우스를 올리면 → **야코비안 고유값**과 안정성 분류가 뜹니다.
 
-### M4. Reaching RNN fixed points + flow field (Stage 2, part 2)
-- fixedpoints.py: minimize q(x) = ½‖dx/dt‖². Optimizer: Adam then optional L-BFGS
-  polish. Sample initial conditions ONLY from hidden states visited on real trials
-  (+ small noise) — not uniformly, which yields spurious slow points.
-- Allow slow points; set the tolerance from the DISTRIBUTION of q values, do not
-  hard-code an absolute threshold (network-dependent). De-duplicate nearby minima by
-  clustering.
-- Classify each point by Jacobian J = ∂(dx/dt)/∂x eigenvalues:
-  stable / unstable / saddle / rotational (complex pair with near-zero real part).
-- flowfield.py: dx/dt on a grid in the top PCA plane.
-- RNN viewer: trajectories + flow field + fixed points colored by stability class.
+> 🔎 **자가 체크:** *왼쪽엔 왜 X가 없을까?*
+> → 답이 §0의 표에 있습니다. 이 답을 말할 수 있으면 프로젝트의 절반을 이해한 것입니다.
 
-### M5. Unified viewer + deploy
-- Toggle: Brain | RNN | side-by-side. Note: the two live in DIFFERENT spaces; render
-  each in its own jPCA space and match only the visual scale — do not force them into
-  one coordinate system. The viewer should surface this limitation honestly.
-- Deploy static app to Hugging Face Spaces (Static SDK).
+조작: 드래그(회전) · 휠(줌) · 시간 슬라이더 재생 · 레이어 토글
 
-## Interactive visualization spec (first-class deliverable — invest here)
-Required interactions:
-- OrbitControls (rotate/zoom/pan).
-- Time scrubber + play/pause: trajectories draw over time.
-- Condition selector: show/hide individual reach conditions.
-- View toggle: Brain(M1) | RNN | side-by-side.
-- RNN-only: toggle flow field; toggle fixed points; on fixed-point hover, tooltip
-  shows Jacobian eigenvalues + stability class.
-- Toggle jPCA rotation-plane highlight.
-Representation:
-- Trajectories as smooth TubeGeometry, conditions distinguished by hue.
-- Fixed points colored by stability class.
-Aesthetics (Apple-grade, restrained): dark background, subtle grid, high contrast,
-clean typographic axis labels/legend. No gratuitous effects. Render brain and RNN at
-matched visual scale so divergences are visible to the eye.
+---
 
-JSON schema (example):
-{ "trajectories": {cond_id: [[x,y,z],...]},
-  "fixed_points": [{"pos":[x,y,z], "eigs":[[re,im],...], "stability":"saddle"}],
-  "flow_field": [{"pos":[x,y,z], "vec":[dx,dy,dz]}],
-  "jpca_plane": [[...],[...]], "meta": {...} }
+## 3. 직관부터 — 비유로 이해하기
 
-## Learning requirements (mandatory — this is half the point)
-- NOTES.md: for each stage, the math and "why this choice + what I rejected".
-- Comments explain WHY, not WHAT.
-- Treat jPCA preprocessing, fixed-point vs slow-point, and Jacobian stability
-  classification in particular depth.
+수식 이전에 **그림**을 머릿속에 넣으면 이후가 전부 쉬워집니다.
 
-## Scope boundary
-This iteration ends at Stage 2 (reproduction + viewer). Shuffle/TME null models, DSA,
-cross-day/cross-task alignment, LFADS/GPFA, and disease data are the NEXT iteration —
-do not add them now, as they explode scope. If you find yourself wanting to add them,
-note the idea in NOTES.md under "Next iteration" and move on.
+### 3.1 준비물: '신경 상태 공간'
+- 뉴런이 N개면, **매 순간**을 "N개의 발화율"로 이루어진 **N차원 공간의 점 하나**로 봅니다.
+- 시간이 흐르면 점이 움직이며 **궤적(선)**을 그립니다. 팔 방향(조건)마다 다른 궤적.
+- Churchland(2012)의 발견: 이 궤적들을 **딱 맞는 2D 평면**에서 보면 다들 **회전**합니다.
 
-## Key references (exact citations)
-Reproduction targets:
-- Churchland et al. (2012), Nature 487(7405):51-56 — jPCA / rotational dynamics (Stage 1)
-- Sussillo & Barak (2013), Neural Computation 25(3):626-649 — fixed-point method (Stage 2)
-- Sussillo, Churchland, Kaufman, Shenoy (2015), Nat Neurosci 18(7):1025-1033 —
-  task-trained RNN reproduces M1 rotations (direct template)
-Methods / tools:
-- Golub & Sussillo (2018), JOSS 3(31):1003 — FixedPointFinder (method reference)
-- Mante, Sussillo, Shenoy, Newsome (2013), Nature 503(7474):78-84 — fixed points dissect computation
-- Pei et al. (2021), NeurIPS Datasets & Benchmarks — MC_Maze / NLB
-Conceptual framing (NOTES.md):
-- Shenoy, Sahani, Churchland (2013), Annu Rev Neurosci 36:337-359 — dynamical systems view
-- Vyas, Golub, Sussillo, Shenoy (2020), Annu Rev Neurosci 43:249-275 — computation through dynamics
-Honesty citations (mention in NOTES even though out of scope):
-- Elsayed & Cunningham (2017), Nat Neurosci 20:1310-1318 — low-D/rotation may be a byproduct
-- Maheswaranathan et al. (2019), NeurIPS 2019:15603-15615 — geometric match is cheap (universality)
-- Ostrow, Eisen, Kozachkov, Fiete (2023), NeurIPS 2023, arXiv:2306.10168 — DSA, the right
-  brain↔RNN comparison tool (next iteration)
+### 3.2 jPCA = "회전이 보이는 각도"를 찾는 자동 카메라 *(기술)*
+
+**비유.** 방 안 사람들이 제각각 움직이는데, 천장에서 내려다보니 다들 회전목마처럼 돌더라 —
+jPCA는 그 **'천장 시점(평면)'**을 데이터에서 **자동으로** 찾아줍니다.
+
+**작동 원리 3줄:**
+1. 각 순간의 **속도**(`Ẋ`)를 **현재 위치**(`X`)로 설명하는 규칙을 찾는다: `속도 = M × 위치`
+2. 단, `M`을 **'순수 회전만 하는 행렬'(반대칭, skew-symmetric)** 로 제한한다
+   - 일반 행렬 = 늘이기 + 회전이 **섞임**
+   - 반대칭 행렬 = 늘이기 **0**, 오직 **빙글빙글 회전**
+3. 그래서 jPCA는 "이 데이터에 회전이 얼마나 있나"를 **정직하게** 잰다 — 억지로 넣는 게 아니라,
+   회전만 남겨서 재는 것
+
+> 💡 **왜 굳이 제약을 거나?** 제약 없이 풀면 더 잘 맞습니다(R² 0.99 vs 0.86). 하지만 그 해는
+> 고유값에 **실수부(감쇠/팽창)** 가 생겨서 **회전이 아닙니다.** 우리가 묻고 싶은 건 "얼마나
+> 회전적인가"이므로, **제약이 곧 질문**입니다. 그 R² 차이(0.99→0.86)가 바로 "회전이 아닌 성분"의 양입니다.
+
+### 3.3 고정점 = 소용돌이의 '배수구' *(기전)*
+
+**비유.** 욕조 물이 배수구로 빠질 때 소용돌이가 생깁니다. 물 입자(= 궤적)들이 빙빙 돕니다.
+**왜 돌까요?** 가운데 **배수구**가 있고 주변 **물살(= 벡터장 `dx/dt`)** 이 소용돌이 모양이기 때문입니다.
+
+| 용어 | 비유 | 의미 |
+|---|---|---|
+| **고정점** | 배수구 중심 | 속도가 0인 점 (`dx/dt = 0`) |
+| **야코비안** | 배수구 주변 물살의 기울기 | 국소 흐름의 모양 |
+| **고유값 (실수 음수)** | 빨려 들어감 | **안정** (attractor) |
+| **고유값 (실수 양수)** | 밀려남 | **불안정** |
+| **고유값 (복소수 `a ± bi`)** | **나선!** | `b` = **회전 속도**, `a>0`이면 밖으로 퍼짐 |
+
+👉 **M4의 결론:** 도달 RNN에서 `0.51 ± 1.33i` 짜리 점을 찾았습니다.
+= *"여기 배수구가 있고, `1.33`의 속도로 회전시키며 밖으로 퍼진다."*
+→ **이 배수구가 M2/M3에서 본 회전을 만든다.**
+
+### 3.4 왜 뇌에는 이걸 못 하나? *(핵심 비대칭)*
+- 뇌에서 가진 것은 **궤적(물 입자 사진)** 뿐. **물살(벡터장 = 방정식)은 모릅니다.**
+- 배수구를 찾으려면 물살을 알아야 하는데, 뇌의 물살이 없습니다 → **뇌엔 고정점 분석 불가.**
+- 반면 jPCA는 사진(궤적)만으로 되니 **뇌에도 됩니다.**
+- **RNN은 우리가 직접 만든 것** → 방정식을 압니다 → 배수구를 찾을 수 있습니다.
+
+⚠️ 오해 주의: 이건 "뇌 데이터가 노이즈가 많아서"가 **아닙니다.** 평가·미분 가능한 함수 `F(x)`가
+아예 **없기** 때문입니다.
+
+### 3.5 왜 RNN을, 그것도 '스파이크가 아니라 과제로' 학습하나?
+- 알고 싶은 건 "뇌 회전이 **왜** 생기나"인데 뇌 방정식이 없다 → 뇌 대신 **같은 일(팔 뻗기)을 하는
+  모델**을 만들어 그 **안**을 들여다본다.
+- ⚠️ **치명적 함정:** RNN을 뇌의 **스파이크에 맞추면**? → "뇌를 베낀 것"이라 "닮았다"는 게 당연해집니다
+  (**순환논법 = 무의미**). 이 오해가 이 분야의 고전적 실수입니다.
+- 그래서 RNN엔 **행동 과제만** 줍니다: 입력 = 목표 방향 + go 신호, 출력 = 손 속도.
+  **신경 데이터는 절대 보여주지 않습니다.**
+- 그런데도 RNN이 **스스로 회전을 만들어냅니다**(M3) → **회전은 이 과제를 푸는 자연스러운 해법**이다.
+  뇌를 베껴서가 아니라.
+
+---
+
+## 4. 결과 한눈에
+
+모든 수치는 실제 실행 결과이며, 노트북을 두 번 독립 실행해 **결정론적으로 재현**됨을 확인했습니다.
+
+| 단계 | 핵심 결과 | 판정 |
+|---|---|---|
+| **M0** | 레퍼런스 대비 평면 각도 **0.0008°**, 주파수 오차 **0.000%**<br>합성 데이터 적합 R² **0.8552** (무제약 상한 0.9886), 평면 분산 **0.9021** | ✅ 통과 |
+| **M1** | 과제 MSE **0.0086** (<0.02) · 고유 고정점 27개 → **안정 8개 + 안장 19개**<br>8개가 **서로 다른 8개 큐브 꼭짓점**, 판독값 모두 ±1의 0.05 이내 | ✅ **게이트 통과** |
+| **M2** | 실데이터 (108조건 × 61시점 × 218뉴런)<br>적합 R² **0.5236** · 회전 평면 분산 **0.4643** · 주파수 **1.37 Hz** | ✅ 통과 |
+| **M3** | 속도 R² **0.9989** (게이트 >0.90)<br>은닉 상태 jPCA 적합 R² **0.884** · 평면 분산 0.149 → **회전 창발** | ✅ 통과 |
+| **M4** | 고정점 **1개**: `|x|=2.58`, **회전 안장점(spiral)**, 주고유쌍 **0.51 ± 1.33i**<br>흐름장 회전 성분(curl) **+0.96** | ✅ 통과 |
+| **M5** | 자체완결 뷰어 124 KB (외부 라이브러리 0) · 3개 뷰 · 고정점 호버 툴팁 | ✅ 검증 완료 |
+
+### 🎯 가장 중요한 두 가지 결과
+
+**① 회전의 원인을 찾았다 (M4)**
+`0.51 ± 1.33i` — 이 **복소 고유쌍의 허수부(1.33)가 국소 회전 속도**입니다.
+고정점에서의 속도는 `3.5e-3`으로, 일반적인 상태에서의 속도(`~12.5`)보다 **약 3500배 작습니다**
+→ 진짜 고정점이지 "느린 점"이 아닙니다.
+
+**② 위상(topology)이 계산을 반영한다 (M1 vs M4 대비)**
+
+| | 플립플롭 | 도달 RNN |
+|---|---|---|
+| 계산 | 3비트 **기억** | 시간에 따른 **회전 출력 생성** |
+| 고정점 구조 | **점 끌개 8개** (큐브 꼭짓점) | **회전 안장점 1개** |
+
+**같은 탐색기, 정반대 위상.** 계산이 다르기 때문입니다.
+→ **고정점 구조가 곧 그 신경망이 수행하는 계산이다.**
+
+---
+
+## 5. 실행 방법
+
+### Colab (권장)
+1. [Colab](https://colab.research.google.com) → **File → Open notebook → GitHub 탭**
+2. 저장소 입력 → `notebook/motor_dynamics.ipynb` 열기
+3. 첫 셀에서 확인: `BRANCH = 'main'` (private 저장소면 `GITHUB_TOKEN` 입력)
+4. 위에서부터 순서대로 실행
+
+**소요 시간:** 첫 실행 시 RNN 학습으로 M3/M5에서 각 ~90초. 학습 결과는 Drive에 캐시되어
+다음 세션부터는 빠릅니다.
+
+### 로컬
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install numpy scipy scikit-learn torch plotly matplotlib
+pip install --no-build-isolation git+https://github.com/bantin/jPCA.git   # 차등검증 레퍼런스
+
+python tests/test_m0_jpca.py        # M0: jPCA 차등검증
+python tests/test_m1_flipflop.py    # M1: 8꼭짓점 게이트
+python tests/test_m2_brain.py       # M2: 실데이터
+python tests/test_m3_reaching.py    # M3: 과제 게이트 + 회전
+python tests/test_m4_fixedpoints.py # M4: 고정점 + 적대적 검증
+```
+
+### 뷰어 빌드 / 배포
+```bash
+python scripts/build_rnn_export.py  # data/rnn.json (캐시 없으면 RNN 자동 학습)
+python scripts/build_viewer.py      # web/index.html (데이터 인라인, 자체완결)
+```
+**Hugging Face Spaces 배포:** Space 생성(SDK: **Static**) → `web/index.html` 하나만 루트에
+올리면 끝(외부 의존성 없음). GitHub Pages도 동일하게 가능.
+
+---
+
+## 6. 단계별 상세
+
+### M0 · jPCA 직접 구현
+
+**목표.** 회전을 재는 자를 손으로 만든다. 그리고 그 자가 맞는지 증명한다.
+
+**방법 (7단계, 고정 규격):**
+1. 조건평균 발화율 `X_c(t)` 준비
+2. 뉴런별 **소프트 정규화** → 시점별 **조건간 평균 차감**
+3. **PCA로 k=6차원** 축소
+4. **유한차분**으로 속도 `Ẋ` 계산 (조건 내부에서만)
+5. **`Ẋ = X Mᵀ` 를 `M = -Mᵀ` (반대칭) 제약 하에 닫힌 형태로 풀기** ← **크럭스**
+6. `M` 고유분해 → 순허수 `±iω` 쌍 중 `|ω|` 최대인 쌍 = 최상위 jPC 평면
+7. 궤적을 그 평면에 투영 → 회전이 보인다
+
+**5단계 구현 방식 (왜 이렇게 풀었나).**
+반대칭 행렬들은 `M = Σ θ_p E_p` 형태로 표현됩니다(`E_p`는 반대칭 기저). 이러면 모델이 `θ`에 대해
+**선형**이 되어, 단 한 번의 `lstsq`로 **닫힌 형태** 해가 나옵니다. 반복 최적화가 필요 없습니다.
+→ 레퍼런스(Antin)는 같은 문제를 **반복 CG**로 풉니다. **서로 다른 알고리즘**이 같은 답에
+도달한다는 것이 강력한 교차검증입니다.
+
+**결과.**
+- 손 구현 vs 레퍼런스: `‖ΔM‖/‖M‖ = 3.8e-5`, **평면 각도 0.0008°**, 주파수 오차 **0.000%**
+- 내부 교차검증(벡터화 LS vs Sylvester 정규방정식): **9e-16** 일치
+- 지상진실: 깨끗한 단일 평면 회전에서 복원 ω = **sin(ω)** 를 **0.0000%** 오차로 확인
+
+**⚠️ 알아둘 편향 (버그 아님).** 전진차분을 쓰면 회전 `ω`에 대해 `Ẋ = (R(ω) − I)X` 가 되고,
+그 반대칭 부분의 고유값은 `±i·sin(ω)` 입니다. 즉 **복원되는 값은 `ω`가 아니라 `sin(ω)`**
+(0.3 rad/bin에서 약 1.5% 편향). 레퍼런스도 **똑같은 편향**을 가집니다. 충실한 재현을 위해
+전진차분을 유지했습니다. (중심차분을 쓰면 줄어들지만, 원 논문과 달라집니다.)
+
+**버린 대안.** 무제약 `M` — 더 잘 맞지만(R² 0.99) 고유값에 실수부가 생겨 **회전이 아님**.
+📁 `python/pca_jpca.py` · `tests/test_m0_jpca.py`
+
+---
+
+### M1 · 플립플롭 보정 — **정답을 아는 사례** (가장 먼저!)
+
+**목표.** 고정점 탐색기가 **정말 작동하는지** 정답이 알려진 문제에서 먼저 증명한다.
+
+**과제.** 3비트 플립플롭: 3개 채널에 가끔 ±1 펄스가 들어오고, 네트워크는 각 채널의 **마지막 펄스
+부호를 기억**해야 합니다. 상태가 2³ = **8개** → 8개의 안정 고정점이 **정육면체 8꼭짓점**에 있어야 합니다.
+
+**결과.**
+- 과제 MSE **0.0086** (해결 기준 <0.02)
+- 고유 고정점 **27개** → **안정 8개** + **안장 19개**
+- 8개가 **서로 다른 8개 꼭짓점**, 판독값 모두 ±1의 **0.05 이내** → ✅ **게이트 통과**
+- 레퍼런스 대조: 레퍼런스가 찾은 점들이 우리 꼭짓점과 **5e-4** 이내 일치 (커버리지 6/8 —
+  레퍼런스의 단순 경사하강이 느려 일부 미수렴; 우리 탐색기는 8개 전부 발견)
+
+**해석.** 안장점 19개는 **전이 구조**입니다. 펄스가 상태를 안장 너머 이웃 꼭짓점의 분지로 밀어
+넣기 때문에, 판독 궤적이 **큐브 모서리를 따라** 움직입니다. Sussillo & Barak(2013)의 위상 구조 그대로.
+
+📁 `python/rnn.py`, `python/fixedpoints.py` · `tests/test_m1_flipflop.py`
+
+---
+
+### M2 · 실제 뇌 데이터에 jPCA *(1단계)*
+
+**데이터.** Churchland et al. 2012 공개 데이터 — **108개 도달 조건 × 61시점 × 218뉴런**,
+발화율 0~147 spikes/s, 움직임 개시 기준 −50~550 ms 정렬. **진짜 원숭이 운동피질 기록입니다.**
+(뉴런별 평균 발화율이 log-normal 분포 — 실제 피질 기록의 지문.)
+
+**결과 (−50~150 ms 창, k=6):**
+- 적합 R² **0.5236** · 회전 평면 분산 **0.4643** (한 평면이 분산의 46%!) · 주파수 **1.37 Hz**
+- 실데이터에서 레퍼런스와 **0.0001°** 일치
+
+**🔬 적대적 검증 — Lebedev(2019)의 비판에 답하기.**
+"조건간 평균 차감"이 회전을 **인위적으로 만들어낸다**는 비판이 있습니다. 그래서 그 단계를 **빼고** 돌려봤습니다:
+
+| | 차감 함 (기본) | 차감 안 함 |
+|---|---|---|
+| 적합 R² | 0.5236 | **0.5563** |
+| 평면 분산 | 0.4643 | **0.5576** |
+| 주파수 | 1.37 Hz | **2.49 Hz** |
+
+**결론:** 회전은 **살아남습니다** → 그 단계가 회전을 **만들어내는 게 아닙니다.**
+다만 주파수와 평면이 바뀝니다 — 차감을 안 하면 jPCA가 **조건-독립** 성분(모든 도달에 공통인
+큰 신호)을 특성화하고, 차감을 하면 **조건-의존** 회전(Churchland의 실제 주장)을 분리합니다.
+**둘 다 진짜 회전이지만, 전처리가 "어느 것을 재는지"를 결정합니다.**
+
+📁 `python/data.py` · `tests/test_m2_brain.py`
+
+---
+
+### M3 · 도달 RNN을 **과제로** 학습 *(2단계 1부)*
+
+**⚠️ 이 단계의 핵심은 "무엇으로 학습하지 않았는가"입니다.** §3.5를 다시 읽으세요.
+
+**RNN 규격.** 256유닛 연속시간 tanh RNN:
+`dx/dt = −x + W_rec·φ(x) + W_in·u + b`, `z = W_out·x` (τ=10, Euler 적분)
+입력 = 목표 방향 `[cosθ, sinθ]` + go 신호 / 출력 = 손 속도 / **신경 데이터 미사용**
+
+**결과.**
+- **속도 R² 0.9989** (게이트 >0.90 통과) → 과제를 풀었으므로 동역학 분석이 의미 있음
+- 은닉 상태 jPCA: 적합 R² **0.884**, 평면 분산 **0.149** → **회전 창발!**
+
+**💡 평면 분산이 15%뿐인데 왜 R²는 0.88인가?** 은닉 공간에서 분산이 가장 큰 축은 **정적인 목표
+튜닝 축**입니다. 회전은 분산은 작지만 **실재하는** 성분이고, jPCA는 위치가 아니라 **미분(동역학)
+구조**를 적합하기 때문에 R²가 높습니다.
+
+**🔬 적대적 검증 — 대사 정규화의 근거는 재현되지 않았다 (정직한 무효 결과).**
+원 규격은 "발화율 L2 페널티가 없으면 비생물학적 **고차원** 해가 나온다"고 했습니다. λ를 바꿔가며 확인:
+
+| λ (대사 페널티) | 속도 R² | jPCA R² | 참여율(PR, 유효 차원) | 평균 발화 크기 |
+|---|---|---|---|---|
+| 0 | 0.998 | 0.884 | **2.52** | 0.392 |
+| 1e-3 (기본값) | 0.998 | 0.905 | 2.56 | 0.368 |
+| 1e-2 | 0.997 | 0.912 | 2.69 | 0.292 |
+| 1e-1 | 0.985 | 0.942 | **3.53** | 0.120 |
+
+**발견:** 페널티는 발화 크기를 확실히 줄입니다(0.39 → 0.12 ✓). 하지만 **차원은 줄지 않고 오히려
+늘어납니다**(2.52 → 3.53) — 규격의 근거와 **반대 방향**입니다.
+**해석:** 이 단순화된 16방향 과제에선 무정규화 해도 이미 저차원입니다. 원 논문의 효과를 보려면
+더 어려운 과제(EMG 출력, 풍부한 조건)가 필요합니다. **페널티는 유지**했고(규격 준수 + 발화 크기
+제한 효과는 실재), **무효 결과를 그대로 보고**합니다.
+
+📁 `python/rnn.py` · `tests/test_m3_reaching.py`
+
+---
+
+### M4 · RNN 고정점 + 흐름장 — **드디어 "왜"** *(2단계 2부)*
+
+**목표.** 회전을 **생성하는** 국소 구조를 찾는다.
+
+**방법 (고정 규격).**
+- **자율계** 벡터장 `F(x) = −x + W_rec·φ(x)` (입력을 0으로 고정)에서 `q(x) = ½‖dx/dt‖²` 최소화
+- 최적화: **Adam → L-BFGS 다듬기**
+- **초기조건(IC)은 실제 시행에서 방문한 상태 + 노이즈에서만** 샘플링
+  → *균일 샘플링은 동역학이 가보지도 않은 영역에 **허위 저속점**을 만듭니다*
+- 허용오차는 **q 값의 분포**에서 결정 (절대값 하드코딩 금지 — 네트워크마다 다름)
+- 인접 최소점은 **군집화로 중복 제거**
+- 야코비안 `J = ∂F/∂x` 고유값으로 분류 (안정/불안정/안장/회전)
+
+**결과.**
+- 고유 고정점 **1개**: `|x| = 2.58`, **안장점이면서 나선(spiral)**, 불안정 방향 6개
+- **주고유쌍 `0.51 ± 1.33i`** ← **허수부 1.33 = 국소 회전 속도 = M2/M3에서 본 회전의 정체**
+- 그 점에서의 속도 `3.5e-3` vs 일반 상태 `~12.5` → **약 3500배 감소** = 진짜 고정점
+- 흐름장 회전 성분(curl) **+0.96** → 궤적이 이 점을 중심으로 **밖으로 나선을 그리며** 회전
+
+**입력에 따라 달라지는 구조.** go 신호가 켜지면 **안정 나선**(`|x|≈18`), 준비 구간에선
+**안장점**(`|x|≈6.8`). 움직임은 이 상태들 사이의 **전이**이고, **모든 점이 나선(복소 고유쌍)이라
+회전합니다.**
+
+**🔬 적대적 검증 — 이게 인공물이 아님을 증명.**
+
+| 검증 | 방법 | 결과 |
+|---|---|---|
+| IC 재샘플링에 안정적인가? | 다른 시드로 탐색기 재실행 | **0.038** 이내에서 같은 점 재발견 ✅ |
+| 독립 솔버도 동의하는가? | SciPy Newton으로 `F(x)=0` 풀기 | 잔차 **2.3e-7**, 거리 **0.037** ✅ |
+
+*레퍼런스 노트: M1의 레퍼런스는 **이산 맵** 전용이라 연속시간 RNN에 쓸 수 없습니다.
+그래서 완전히 다른 알고리즘(**Newton 근찾기**)을 오라클로 사용했습니다 — M0의 차등검증 정신 그대로.*
+
+📁 `python/fixedpoints.py`, `python/flowfield.py` · `tests/test_m4_fixedpoints.py`
+
+---
+
+### M5 · 통합 뷰어 + 배포
+
+**설계 원칙 — 비대칭을 UI로 강제한다.**
+- **뇌 뷰**: 궤적 + jPCA 평면. 흐름장·고정점 토글이 **비활성화**되고 "no equations" 라벨 표시
+- **RNN 뷰**: + 고정점(안정성별 색상, 호버 시 야코비안 고유값) + 흐름장
+- **나란히 보기**: 각각 **자기 jPCA 공간**에서 렌더링하고 **시각적 스케일만** 맞춤.
+  하나의 좌표계로 억지로 밀어넣지 **않습니다** — 그건 틀린 비교이고, 뷰어가 이 한계를 명시합니다.
+
+**구현.** 외부 라이브러리 **0개**, 데이터 인라인, 자체 Canvas 3D 렌더러 → **단일 124 KB HTML 파일**.
+로컬 파일·정적 호스팅·공유 링크 어디서든 동일하게 동작.
+검증: Playwright + Chromium으로 3개 뷰 렌더 및 툴팁 동작 확인, **콘솔 에러 0**.
+
+📁 `python/export.py`, `scripts/build_*.py`, `web/`
+
+---
+
+## 7. 구현 규격 — 고정 약속 *(변경 시 결과 신뢰성에 영향)*
+
+이 항목들은 **결과를 반증 가능하게 만드는 근거**입니다. 임의로 바꾸면 "왜 이 결과를 믿을 수
+있는가"가 사라집니다.
+
+1. **jPCA 7단계** (§6 M0) — 순서, 조건간 평균 차감, 반대칭 제약
+2. **고정점 목표** `q(x) = ½‖dx/dt‖²`
+3. **IC 샘플링 규칙** — 실제 방문 상태 + 노이즈에서만 (균일 샘플링 금지)
+4. **허용오차** — q 분포에서 결정 (절대값 하드코딩 금지)
+5. **차등검증 기준** — 평면 각도 **< 5°**, 주파수 **< 5%**
+6. **플립플롭 8꼭짓점 게이트** — 실패 시 진행 중단
+7. **"스파이크가 아니라 과제로 학습"** — 절대 원칙
+8. **범위 경계** — 2단계에서 종료 (§11 참조)
+
+---
+
+## 8. 차등검증 로그
+
+손으로 짠 코드를 **동일 입력**에서 유지·관리되는 레퍼런스와 대조한 기록입니다.
+레퍼런스는 대체재가 아니라 **기준(oracle)** 이며, 불일치 시 진행하지 않고 디버그했습니다.
+
+| # | 검증 | 동일 입력 | 기준 | 결과 |
+|---|---|---|---|---|
+| M0-A | 손 닫힌형태 `M` vs Antin 반복 CG | 동일 `(X, Ẋ)` | 평면 각도 <5° | `‖ΔM‖/‖M‖` 3.8e-5, **0.0008°** ✅ |
+| M0-A′ | 벡터화 LS vs Sylvester (두 닫힌형태) | 동일 `(X, Ẋ)` | <1e-8 | **9e-16** ✅ |
+| M0-B | 전체 파이프라인 vs `JPCA.fit()` | 동일 원본 데이터 | <5°, <5% | **0.0008°**, **0.000%** ✅ |
+| M0-truth | 깨끗한 단일 평면 회전 | 순수 `R(ω)` 궤도 | ω = sin(ω), <0.5% | **0.0000%** ✅ |
+| M1 | 우리 탐색기 vs `pytorch-fixed-point-analysis` | 동일 학습된 RNN | 우리 꼭짓점과 <0.15 | 정밀도 **5e-4**, 커버리지 6/8 ✅ |
+| M2 | 손 `jpca()` vs `JPCA.fit()` — **실데이터** | 동일 Churchland 발화율 | <5°, <5% | **0.0001°**, **0.000%** ✅ |
+| M4 | 우리 Adam+L-BFGS vs **SciPy Newton** | 동일 연속 벡터장 | 거리 <0.2 | 거리 **0.037**, ‖F‖ 2.3e-7 ✅ |
+| M4-재샘플 | 시드1 vs 시드777 | 동일 RNN, 다른 IC | <0.5 | **0.038** ✅ |
+
+---
+
+## 9. 정직한 한계와 미결정 사항
+
+**결과를 해석할 때 반드시 함께 읽어야 할 부분입니다.**
+
+### 9.1 알려진 한계
+
+1. **널 모델이 없습니다** ⚠️ *(가장 큰 공백)*
+   "회전 R² = 0.52"는 있지만 **"우연히 이 정도가 나올 확률"** 이 없습니다.
+   Elsayed & Cunningham(2017)은 "저차원/회전은 부산물일 수 있다"고 비판했는데, 여기에 답하려면
+   shuffle/TME 널 모델이 필요합니다 → 다음 이터레이션.
+
+2. **RNN 과제는 이상화된 것입니다**
+   16방향 종 모양 속도 프로파일을 **수식으로 생성**했습니다. 실제 원숭이 손 궤적이나 EMG가
+   **아닙니다**. 원 논문(Sussillo 2015)은 실제 기록된 EMG로 학습했습니다.
+   → **방법은 진짜(과제 학습), 과제는 단순화.**
+
+3. **MC_Maze 대신 Churchland 2012** — 이 환경에서 DANDI API가 차단되어(403), 규격의 대체 규칙에
+   따라 **1단계의 원본 데이터셋**을 사용했습니다. 합성 데이터는 사용하지 않았습니다.
+
+4. **데이터는 이미 시행평균·스무딩된 공개본**입니다. "20 ms 빈, σ=40 ms" 전처리는 우리가 한 게
+   아니라 원 저자가 해둔 것입니다. 다운로드 출처는 제3자 미러이며, 규격(108×61×218)과 발화율
+   통계는 확인했으나 원본 대비 체크섬 검증은 하지 않았습니다.
+
+5. **대사 정규화의 근거가 재현되지 않았습니다** (§6 M3 표) — 페널티는 유지하되 무효 결과를 보고.
+
+6. **전진차분 주파수 편향** — 복원값은 `ω`가 아니라 `sin(ω)` (§6 M0). 레퍼런스와 동일.
+
+### 9.2 미결정 사항 *(사용자 판단 대기)*
+
+| # | 사안 | 권장 |
+|---|---|---|
+| **D1** | 데이터셋: Churchland 2012 유지 vs MC_Maze 전환(DANDI 접근 필요) | **유지** — 1단계 재현 대상 그 자체 |
+| **D2** | 대사 정규화: 유지 vs 과제를 EMG 수준으로 강화(범위 확장) | **유지 + 무효 결과 기록** |
+
+### 9.3 정직성 인용 *(범위 밖이지만 반드시 알아야 할 비판)*
+- **Elsayed & Cunningham (2017)** — 저차원/회전은 부산물일 수 있다
+- **Maheswaranathan et al. (2019)** — 기하적 일치는 값싸다 (보편성)
+- **Lebedev et al. (2019)** — 조건간 평균 차감 비판 (§6 M2에서 직접 검증함)
+
+---
+
+## 10. 저장소 구조
+
+```
+notebook/motor_dynamics.ipynb  📓 메인 학습 문서 (위→아래 실행, 한/영 병기)
+python/
+  pca_jpca.py     jPCA 직접 구현 (M0)          ⭐ 핵심
+  fixedpoints.py  고정점 탐색기 + 야코비안 (M1/M4)  ⭐ 핵심
+  rnn.py          플립플롭 RNN + 도달 RNN (M1/M3)
+  data.py         Churchland 2012 실데이터 로더 (M2)
+  flowfield.py    흐름장 dx/dt 격자 샘플링 (M4)
+  export.py       웹 JSON 직렬화 (M5)
+tests/            반증 가능한 검증 — 결과 수치의 출처
+scripts/          rnn.json / index.html 빌드
+web/index.html    자체완결 뷰어 (생성물)
+data/*.json       내보낸 궤적·고정점·흐름장
+```
+
+**노트북 구성.** 각 마일스톤이 5단계 리듬으로 반복됩니다:
+**① 수식/이유 → ② 🔍 구현 핵심(실제 소스를 인라인 표시) → ③ 실행(숫자) → ④ 그림 → ⑤ 해석**
+
+---
+
+## 11. 다음 이터레이션 *(의도적으로 지금은 하지 않음)*
+
+범위를 지키기 위해 미룬 것들. 가치순:
+
+1. **🥇 널 모델 (shuffle / TME)** — "회전이 통계적으로 유의한가?" 현재 가장 큰 과학적 공백
+2. **🥈 RNN 과제를 실제 데이터에 연결** — 실제 조건 구조/EMG 기반 학습
+3. **🥉 DSA** (Ostrow et al. 2023) — 좌표계를 강요하지 않는 **올바른** 뇌↔RNN 비교 도구
+4. 교차일/교차과제 정렬 · LFADS/GPFA (잠재변수 추정) · 질환 데이터
+
+---
+
+## 12. 참고문헌
+
+**재현 대상**
+- Churchland, Cunningham, Kaufman, Foster, Nuyujukian, Ryu, Shenoy (2012).
+  *Neural population dynamics during reaching.* **Nature 487(7405):51–56** — jPCA / 회전 동역학 (1단계)
+- Sussillo & Barak (2013). *Opening the black box: low-dimensional dynamics in high-dimensional
+  recurrent neural networks.* **Neural Computation 25(3):626–649** — 고정점 방법 (2단계)
+- Sussillo, Churchland, Kaufman, Shenoy (2015). *A neural network that finds a naturalistic
+  solution for the production of muscle activity.* **Nat Neurosci 18(7):1025–1033** — 과제학습
+  RNN이 M1 회전을 재현 (직접 템플릿)
+
+**방법 / 도구**
+- Golub & Sussillo (2018). *FixedPointFinder.* **JOSS 3(31):1003**
+- Mante, Sussillo, Shenoy, Newsome (2013). **Nature 503(7474):78–84** — 고정점으로 계산을 해부
+- Pei et al. (2021). **NeurIPS Datasets & Benchmarks** — MC_Maze / NLB
+
+**개념적 틀**
+- Shenoy, Sahani, Churchland (2013). **Annu Rev Neurosci 36:337–359** — 동역학계 관점
+- Vyas, Golub, Sussillo, Shenoy (2020). **Annu Rev Neurosci 43:249–275** — 동역학을 통한 계산
+
+**비판 / 정직성**
+- Elsayed & Cunningham (2017). **Nat Neurosci 20:1310–1318**
+- Maheswaranathan, Williams, Golub, Ganguli, Sussillo (2019). **NeurIPS 2019:15603–15615**
+- Lebedev et al. (2019) — 조건간 평균 차감 비판
+- Ostrow, Eisen, Kozachkov, Fiete (2023). **NeurIPS 2023, arXiv:2306.10168** — DSA
+
+**참조 구현 (차등검증 오라클)**
+- Benjamin Antin, `jPCA` (Python) — https://github.com/bantin/jPCA
+- `tripdancer0916/pytorch-fixed-point-analysis`

@@ -9,8 +9,8 @@ al. 2012** dataset itself — the exact Stage-1 reproduction target (Nature 487:
 218 neurons x 108 maze/reach conditions of condition-averaged, smoothed firing
 rates. It is arguably MORE faithful for "reproduce Churchland 2012" than MC_Maze,
 and it is the data Benjamin Antin's reference loader consumes, so the M0
-differential test runs on identical real input. See NOTES "M2 / Proposed
-deviations".
+differential test runs on identical real input. See README section 9 (limitations
+and open decisions, D1).
 
 The rates are already trial-averaged and smoothed (as published), aligned around
 movement onset (times -50..550 ms, 10 ms bins spanning prep + movement). The
@@ -91,5 +91,5 @@ def load_mc_maze(cache_dir="cache"):
         "MC_Maze requires the DANDI API (api.dandiarchive.org), which is blocked "
         "by the egress policy in this environment (403 on CONNECT). Use "
         "load_churchland() — the actual Stage-1 (Churchland 2012) dataset. See "
-        "NOTES 'M2 / Proposed deviations'."
+        "README section 9 (limitations / open decision D1)."
     )
